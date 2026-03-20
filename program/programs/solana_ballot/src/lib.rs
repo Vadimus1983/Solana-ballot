@@ -1,14 +1,15 @@
 use anchor_lang::prelude::*;
-use constants::{HASH_SIZE, PROOF_A_SIZE, PROOF_B_SIZE, PROOF_C_SIZE};
+use constants::{HASH_SIZE, PROOF_A_SIZE, PROOF_B_SIZE};
 
 pub mod constants;
+pub mod merkle;
 pub mod error;
 pub mod instructions;
 pub mod state;
 
 use instructions::{
     initialize::*, create_proposal::*, register_voter::*, open_voting::*,
-    cast_vote::*, close_voting::*, reveal_vote::*, finalize_tally::*,
+    store_vk::*, cast_vote::*, close_voting::*, reveal_vote::*, finalize_tally::*,
 };
 
 declare_id!("2h52sCAKhKtBFdyTfa3XamcWXkZB6M3D7XknNNfkQivZ");
@@ -56,6 +57,31 @@ pub mod solana_ballot {
         instructions::register_voter::handler(ctx, commitment)
     }
 
+    /// Stores the Groth16 verifying key on-chain after the trusted setup ceremony.
+    ///
+    /// Must be called once by the admin before any votes can be cast with real
+    /// ZK proof verification. Until this is called, `cast_vote` runs in
+    /// development mode (proof verification skipped).
+    ///
+    /// # Parameters
+    ///
+    /// - `vk_alpha_g1` — G1 point: vk.alpha (64 bytes, big-endian uncompressed BN254)
+    /// - `vk_beta_g2`  — G2 point: vk.beta  (128 bytes)
+    /// - `vk_gamma_g2` — G2 point: vk.gamma (128 bytes)
+    /// - `vk_delta_g2` — G2 point: vk.delta (128 bytes)
+    /// - `vk_ic`       — IC points: constant term + one per public input (5 × 64 bytes)
+    #[allow(clippy::too_many_arguments)]
+    pub fn store_vk(
+        ctx: Context<StoreVk>,
+        vk_alpha_g1: [u8; PROOF_A_SIZE],
+        vk_beta_g2: [u8; PROOF_B_SIZE],
+        vk_gamma_g2: [u8; PROOF_B_SIZE],
+        vk_delta_g2: [u8; PROOF_B_SIZE],
+        vk_ic: [[u8; PROOF_A_SIZE]; 5],
+    ) -> Result<()> {
+        instructions::store_vk::handler(ctx, vk_alpha_g1, vk_beta_g2, vk_gamma_g2, vk_delta_g2, vk_ic)
+    }
+
     /// Opens voting for a proposal, transitioning it from Registration → Voting.
     ///
     /// After this call, voters can submit ZK proofs via `cast_vote`.
@@ -76,27 +102,23 @@ pub mod solana_ballot {
     /// A nullifier is stored on-chain to prevent the same voter from voting twice.
     ///
     /// # Parameters
-    /// - `proof_a`         — Groth16 proof component A (G1 point, 64 bytes).
-    /// - `proof_b`         — Groth16 proof component B (G2 point, 128 bytes).
-    /// - `proof_c`         — Groth16 proof component C (G1 point, 64 bytes).
+    /// - `proof`           — Groth16 proof components concatenated:
+    ///                       `proof_a (64 B) || proof_b (128 B) || proof_c (64 B)` = 256 bytes.
+    ///                       Passed as `Vec<u8>` so Borsh heap-allocates the bytes, keeping
+    ///                       the dispatcher's BPF stack frame within Solana's 4096-byte limit.
     /// - `nullifier`       — Public unique value derived from `Poseidon(secret_key, proposal_id)`.
     ///                       Stored on-chain to prevent double voting.
     /// - `vote_commitment` — `Poseidon(vote, randomness)` — hides the vote until reveal phase.
-    /// - `merkle_root`     — The Merkle root the proof was generated against.
-    ///                       Must match the current on-chain root.
+    ///
+    /// Note: `merkle_root` is read from `proposal.merkle_root`, not supplied by the client.
+    /// A proof generated against a stale root will fail on-chain verification.
     pub fn cast_vote(
         ctx: Context<CastVote>,
-        proof_a: [u8; PROOF_A_SIZE],
-        proof_b: [u8; PROOF_B_SIZE],
-        proof_c: [u8; PROOF_C_SIZE],
+        proof: Vec<u8>,
         nullifier: [u8; HASH_SIZE],
         vote_commitment: [u8; HASH_SIZE],
-        merkle_root: [u8; HASH_SIZE],
     ) -> Result<()> {
-        instructions::cast_vote::handler(
-            ctx, proof_a, proof_b, proof_c,
-            nullifier, vote_commitment, merkle_root,
-        )
+        instructions::cast_vote::handler(ctx, proof, nullifier, vote_commitment)
     }
 
     /// Closes the voting period. No more votes can be cast after this.

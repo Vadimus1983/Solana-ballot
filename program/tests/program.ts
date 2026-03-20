@@ -19,21 +19,19 @@ describe("solana_ballot", () => {
   // Voter commitment: Poseidon(secret_key, randomness) — mocked as 32 bytes of 0x01
   const commitment = Buffer.alloc(32, 1);
 
-  // After registering one voter via XOR stub: merkle_root = 0x00 XOR 0x01...01 = 0x01...01
-  const merkleRoot = Buffer.alloc(32, 1);
-
-  // Mock nullifier: in Phase 2 this will be Poseidon(secret_key, proposal_id)
+  // Mock nullifier: Poseidon(secret_key, proposal_id) — mocked for Phase 2 testing
   const nullifier = Buffer.alloc(32, 0xab);
 
-  // Mock vote commitment: in Phase 2 this will be Poseidon(vote=1, randomness)
+  // Mock vote commitment: Poseidon(vote=1, randomness) — mocked for Phase 2 testing
   const voteCommitment = Buffer.alloc(32, 0xcd);
 
-  // Mock Groth16 proof components — stub verification always passes in Phase 1
-  const proofA = Buffer.alloc(64, 0);
-  const proofB = Buffer.alloc(128, 0);
-  const proofC = Buffer.alloc(64, 0);
+  // Mock Groth16 proof — VK not initialized so verification is skipped.
+  // Encoded as proof_a (64 B) || proof_b (128 B) || proof_c (64 B) = 256 bytes.
+  // The program accepts a single Vec<u8> to keep the BPF stack frame under 4096 bytes.
+  const proof = Buffer.alloc(64 + 128 + 64, 0);
 
   let proposalPda: anchor.web3.PublicKey;
+  let vkPda: anchor.web3.PublicKey;
   let nullifierRecordPda: anchor.web3.PublicKey;
   let voteRecordPda: anchor.web3.PublicKey;
 
@@ -42,6 +40,14 @@ describe("solana_ballot", () => {
     const titleSeed = Buffer.from(t).slice(0, 32);
     const [pda] = anchor.web3.PublicKey.findProgramAddressSync(
       [Buffer.from("proposal"), adminKey.toBuffer(), titleSeed],
+      program.programId
+    );
+    return pda;
+  }
+
+  function getVkPda() {
+    const [pda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("vk")],
       program.programId
     );
     return pda;
@@ -67,6 +73,7 @@ describe("solana_ballot", () => {
 
   it("Creates a proposal", async () => {
     proposalPda = getProposalPda(admin.publicKey, title);
+    vkPda = getVkPda();
 
     await program.methods
       .createProposal(title, description, new anchor.BN(votingStart), new anchor.BN(votingEnd))
@@ -96,6 +103,7 @@ describe("solana_ballot", () => {
 
     const proposal = await program.account.proposal.fetch(proposalPda);
     assert.equal(proposal.voterCount.toNumber(), 1);
+
   });
 
   it("Opens voting", async () => {
@@ -115,18 +123,18 @@ describe("solana_ballot", () => {
     nullifierRecordPda = getNullifierPda(proposalPda, nullifier);
     voteRecordPda = getVoteRecordPda(proposalPda, nullifier);
 
+    // VK account is not initialized → cast_vote skips proof verification (dev mode).
+    // In production: call store_vk first, then cast_vote performs real Groth16 verification.
     await program.methods
       .castVote(
-        [...proofA],
-        [...proofB],
-        [...proofC],
+        proof,           // Vec<u8>: proof_a (64) || proof_b (128) || proof_c (64)
         [...nullifier],
         [...voteCommitment],
-        [...merkleRoot],
       )
       .accounts({
         voter: admin.publicKey,
         proposal: proposalPda,
+        vkAccount: vkPda,
         nullifierRecord: nullifierRecordPda,
         voteRecord: voteRecordPda,
         systemProgram: anchor.web3.SystemProgram.programId,
@@ -154,7 +162,6 @@ describe("solana_ballot", () => {
   });
 
   it("Reveals a vote", async () => {
-    // vote=1 (yes), randomness mocked — Phase 2 will verify Poseidon(vote, randomness) == voteCommitment
     const randomness = Buffer.alloc(32, 0);
 
     await program.methods
@@ -194,7 +201,6 @@ describe("solana_ballot", () => {
   // ── Negative / guard tests ─────────────────────────────────────────────────
 
   it("Rejects proposal with title too long", async () => {
-    // 129 chars — exceeds MAX_TITLE_LEN (128); PDA seed uses only first 32 bytes
     const longTitle = "a".repeat(129);
     const pda = getProposalPda(admin.publicKey, longTitle);
 
@@ -214,7 +220,6 @@ describe("solana_ballot", () => {
   });
 
   it("Rejects voter registration by non-admin", async () => {
-    // Create a fresh proposal so it is still in Registration status
     const altTitle = "Alt proposal";
     const altPda = getProposalPda(admin.publicKey, altTitle);
 
@@ -251,7 +256,6 @@ describe("solana_ballot", () => {
   });
 
   it("Rejects open_voting with no registered voters", async () => {
-    // Fresh proposal with no voters registered
     const emptyTitle = "Empty proposal";
     const emptyPda = getProposalPda(admin.publicKey, emptyTitle);
 
@@ -279,22 +283,17 @@ describe("solana_ballot", () => {
   });
 
   it("Rejects double vote with same nullifier", async () => {
-    // The nullifier from the happy path is already stored on-chain.
-    // A second cast_vote with the same nullifier must fail because
-    // the NullifierRecord PDA already exists (init would conflict).
     try {
       await program.methods
         .castVote(
-          [...proofA],
-          [...proofB],
-          [...proofC],
+          proof,
           [...nullifier],
           [...voteCommitment],
-          [...merkleRoot],
         )
         .accounts({
           voter: admin.publicKey,
           proposal: proposalPda,
+          vkAccount: vkPda,
           nullifierRecord: nullifierRecordPda,
           voteRecord: voteRecordPda,
           systemProgram: anchor.web3.SystemProgram.programId,
@@ -302,13 +301,11 @@ describe("solana_ballot", () => {
         .rpc();
       assert.fail("Should have thrown");
     } catch (err) {
-      // Anchor init fails when account already exists
       assert.ok(err, "Double vote should be rejected");
     }
   });
 
   it("Rejects finalize before close", async () => {
-    // Open a fresh proposal and try to finalize it immediately
     const freshTitle = "Fresh proposal";
     const freshPda = getProposalPda(admin.publicKey, freshTitle);
 

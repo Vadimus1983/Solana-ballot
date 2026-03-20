@@ -28,6 +28,11 @@ pub struct Proposal {
     /// Used in ZK proofs to prove a voter is eligible without revealing identity.
     pub merkle_root: [u8; HASH_SIZE],
 
+    /// Incremental Merkle tree frontier — the rightmost filled node at each level.
+    /// Updated by `register_voter` on each leaf insertion.
+    /// Only the frontier needs to be stored (not the full tree) — 20 × 32 = 640 bytes.
+    pub merkle_frontier: [[u8; HASH_SIZE]; MERKLE_DEPTH],
+
     /// Total number of registered voters (Merkle tree leaves)
     pub voter_count: u64,
 
@@ -54,6 +59,7 @@ impl Proposal {
         + 8                                        // voting_end
         + 1                                        // status
         + HASH_SIZE                                // merkle_root
+        + MERKLE_FRONTIER_SIZE                     // merkle_frontier (20 × 32 = 640 bytes)
         + 8                                        // voter_count
         + 8                                        // vote_count
         + 8                                        // yes_count

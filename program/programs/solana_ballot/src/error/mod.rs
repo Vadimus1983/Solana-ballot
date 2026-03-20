@@ -43,4 +43,13 @@ pub enum BallotError {
 
     #[msg("Proposal is not in Registration phase")]
     NotInRegistration,
+
+    #[msg("Poseidon hash computation failed")]
+    HashError,
+
+    #[msg("Merkle tree is full — maximum voters reached")]
+    TreeFull,
+
+    #[msg("Verification key not initialized — call store_vk first")]
+    VkNotInitialized,
 }

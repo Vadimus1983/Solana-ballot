@@ -27,6 +27,7 @@ pub fn handler(
     proposal.voting_end = voting_end;
     proposal.status = ProposalStatus::Registration;
     proposal.merkle_root = [0u8; HASH_SIZE];
+    proposal.merkle_frontier = [[0u8; HASH_SIZE]; MERKLE_DEPTH];
     proposal.voter_count = 0;
     proposal.vote_count = 0;
     proposal.yes_count = 0;

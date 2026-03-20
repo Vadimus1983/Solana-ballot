@@ -21,7 +21,14 @@ custom-panic = []
 
 
 [dependencies]
-anchor-lang = "0.32.0"
+anchor-lang           = "0.32.0"
+groth16-solana        = "0.2"    # Groth16 verifier using Solana alt_bn128 syscalls
+# Poseidon hash:
+#   - On BPF target: sol_poseidon syscall via solana-define-syscall (zero stack allocation)
+#   - On native target: light-poseidon (for unit tests; no BPF stack limit applies)
+solana-define-syscall = "2"      # Exposes sol_poseidon syscall for BPF target
+light-poseidon        = "0.2"    # Poseidon for native/test target
+ark-bn254             = "0.4"    # BN254 field element type used by light-poseidon
 
 
 [lints.rust]

@@ -2,6 +2,7 @@ use anchor_lang::prelude::*;
 use crate::state::proposal::{Proposal, ProposalStatus};
 use crate::error::BallotError;
 use crate::constants::*;
+use crate::merkle::insert_leaf;
 
 pub fn handler(ctx: Context<RegisterVoter>, commitment: [u8; HASH_SIZE]) -> Result<()> {
     let proposal = &mut ctx.accounts.proposal;
@@ -11,11 +12,16 @@ pub fn handler(ctx: Context<RegisterVoter>, commitment: [u8; HASH_SIZE]) -> Resu
         BallotError::VotingAlreadyClosed
     );
 
-    // Stub merkle root update: XOR current root with new commitment
-    // TODO Phase 2: replace with proper incremental Merkle tree
-    for i in 0..HASH_SIZE {
-        proposal.merkle_root[i] ^= commitment[i];
-    }
+    // Insert commitment as a new leaf in the incremental Merkle tree.
+    // voter_count before incrementing is the index of the new leaf.
+    // Returns the new Merkle root which is stored on-chain and verified in cast_vote.
+    let leaf_index = proposal.voter_count; // copy before mutable borrow
+    let new_root = insert_leaf(
+        &mut proposal.merkle_frontier,
+        commitment,
+        leaf_index,
+    )?;
+    proposal.merkle_root = new_root;
     proposal.voter_count += 1;
 
     emit!(VoterRegistered {

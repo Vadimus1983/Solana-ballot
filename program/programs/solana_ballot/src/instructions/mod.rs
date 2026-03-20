@@ -2,6 +2,7 @@ pub mod initialize;
 pub mod create_proposal;
 pub mod register_voter;
 pub mod open_voting;
+pub mod store_vk;
 pub mod cast_vote;
 pub mod close_voting;
 pub mod reveal_vote;
