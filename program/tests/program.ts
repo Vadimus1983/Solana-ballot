@@ -2,6 +2,30 @@ import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { SolanaBallot } from "../target/types/solana_ballot";
 import { assert } from "chai";
+import { poseidon2 } from "poseidon-lite";
+import { keccak_256 } from "@noble/hashes/sha3";
+
+/** Encode a 32-byte big-endian buffer as a field element (BigInt). */
+function bufToBigInt(buf: Buffer): bigint {
+  return BigInt("0x" + buf.toString("hex"));
+}
+
+/** Convert a field element (BigInt) to a 32-byte big-endian Buffer. */
+function bigIntToBuf(n: bigint): Buffer {
+  return Buffer.from(n.toString(16).padStart(64, "0"), "hex");
+}
+
+/**
+ * Compute Poseidon(vote_bytes, randomness) — matches the on-chain check in
+ * reveal_vote.rs.  `vote` is encoded as a 32-byte big-endian scalar (last byte
+ * = vote value, upper 31 bytes = 0), mirroring the Circom field element layout.
+ */
+function computeVoteCommitment(vote: 0 | 1, randomness: Buffer): Buffer {
+  const voteField = BigInt(vote);          // 0n or 1n
+  const randField = bufToBigInt(randomness);
+  const hash = poseidon2([voteField, randField]);
+  return bigIntToBuf(hash);
+}
 
 describe("solana_ballot", () => {
   anchor.setProvider(anchor.AnchorProvider.env());
@@ -10,9 +34,11 @@ describe("solana_ballot", () => {
 
   const admin = provider.wallet;
 
-  // Voting period: starts 1 second ago, ends 1 hour from now
+  // Voting period: already started, ends 2 seconds from now.
+  // The short window lets close_voting (which enforces now >= voting_end) succeed
+  // after a brief sleep without slowing the test suite significantly.
   const votingStart = Math.floor(Date.now() / 1000) - 1;
-  const votingEnd = Math.floor(Date.now() / 1000) + 3600;
+  const votingEnd = Math.floor(Date.now() / 1000) + 2;
   const title = "Fund marketing campaign";
   const description = "Allocate 100k USDC to marketing";
 
@@ -22,8 +48,11 @@ describe("solana_ballot", () => {
   // Mock nullifier: Poseidon(secret_key, proposal_id) — mocked for Phase 2 testing
   const nullifier = Buffer.alloc(32, 0xab);
 
-  // Mock vote commitment: Poseidon(vote=1, randomness) — mocked for Phase 2 testing
-  const voteCommitment = Buffer.alloc(32, 0xcd);
+  // Reveal randomness — kept fixed so the commitment is deterministic in tests.
+  const revealRandomness = Buffer.alloc(32, 0);
+
+  // Real Poseidon(vote=1, randomness=[0;32]) commitment — must match reveal_vote check.
+  const voteCommitment = computeVoteCommitment(1, revealRandomness);
 
   // Mock Groth16 proof — VK not initialized so verification is skipped.
   // Encoded as proof_a (64 B) || proof_b (128 B) || proof_c (64 B) = 256 bytes.
@@ -34,12 +63,13 @@ describe("solana_ballot", () => {
   let vkPda: anchor.web3.PublicKey;
   let nullifierRecordPda: anchor.web3.PublicKey;
   let voteRecordPda: anchor.web3.PublicKey;
+  let programConfigPda: anchor.web3.PublicKey;
 
-  // Mirror the on-chain PDA derivation: truncate title to 32 bytes (Solana seed limit)
+  // Mirror the on-chain seed: keccak-256 of the full title.
   function getProposalPda(adminKey: anchor.web3.PublicKey, t: string) {
-    const titleSeed = Buffer.from(t).slice(0, 32);
+    const titleHash = Buffer.from(keccak_256(Buffer.from(t)));
     const [pda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("proposal"), adminKey.toBuffer(), titleSeed],
+      [Buffer.from("proposal"), adminKey.toBuffer(), titleHash],
       program.programId
     );
     return pda;
@@ -70,6 +100,25 @@ describe("solana_ballot", () => {
   }
 
   // ── Happy path ────────────────────────────────────────────────────────────
+
+  it("Initializes the program", async () => {
+    [programConfigPda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("config")],
+      program.programId
+    );
+
+    await program.methods
+      .initialize()
+      .accounts({
+        admin: admin.publicKey,
+        programConfig: programConfigPda,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const config = await program.account.programConfig.fetch(programConfigPda);
+    assert.equal(config.authority.toBase58(), admin.publicKey.toBase58());
+  });
 
   it("Creates a proposal", async () => {
     proposalPda = getProposalPda(admin.publicKey, title);
@@ -149,10 +198,13 @@ describe("solana_ballot", () => {
   });
 
   it("Closes voting", async () => {
+    // Wait for voting_end to pass — close_voting enforces now >= voting_end.
+    await new Promise(r => setTimeout(r, 3000));
+
     await program.methods
       .closeVoting()
       .accounts({
-        admin: admin.publicKey,
+        closer: admin.publicKey,
         proposal: proposalPda,
       })
       .rpc();
@@ -162,12 +214,10 @@ describe("solana_ballot", () => {
   });
 
   it("Reveals a vote", async () => {
-    const randomness = Buffer.alloc(32, 0);
-
     await program.methods
-      .revealVote(1, [...randomness])
+      .revealVote(1, [...revealRandomness])
       .accounts({
-        voter: admin.publicKey,
+        revealer: admin.publicKey,
         proposal: proposalPda,
         voteRecord: voteRecordPda,
       })
@@ -186,7 +236,7 @@ describe("solana_ballot", () => {
     await program.methods
       .finalizeTally()
       .accounts({
-        admin: admin.publicKey,
+        finalizer: admin.publicKey,
         proposal: proposalPda,
       })
       .rpc();
@@ -222,9 +272,10 @@ describe("solana_ballot", () => {
   it("Rejects voter registration by non-admin", async () => {
     const altTitle = "Alt proposal";
     const altPda = getProposalPda(admin.publicKey, altTitle);
+    const altFutureEnd = Math.floor(Date.now() / 1000) + 3600;
 
     await program.methods
-      .createProposal(altTitle, description, new anchor.BN(votingStart), new anchor.BN(votingEnd))
+      .createProposal(altTitle, description, new anchor.BN(votingStart), new anchor.BN(altFutureEnd))
       .accounts({
         admin: admin.publicKey,
         proposal: altPda,
@@ -258,9 +309,10 @@ describe("solana_ballot", () => {
   it("Rejects open_voting with no registered voters", async () => {
     const emptyTitle = "Empty proposal";
     const emptyPda = getProposalPda(admin.publicKey, emptyTitle);
+    const emptyFutureEnd = Math.floor(Date.now() / 1000) + 3600;
 
     await program.methods
-      .createProposal(emptyTitle, description, new anchor.BN(votingStart), new anchor.BN(votingEnd))
+      .createProposal(emptyTitle, description, new anchor.BN(votingStart), new anchor.BN(emptyFutureEnd))
       .accounts({
         admin: admin.publicKey,
         proposal: emptyPda,
@@ -305,12 +357,154 @@ describe("solana_ballot", () => {
     }
   });
 
+  it("Rejects close_voting before voting_end", async () => {
+    const earlyCloseTitle = "Early close test";
+    const earlyClosePda = getProposalPda(admin.publicKey, earlyCloseTitle);
+    const futureEnd = Math.floor(Date.now() / 1000) + 3600;
+
+    await program.methods
+      .createProposal(earlyCloseTitle, description, new anchor.BN(votingStart), new anchor.BN(futureEnd))
+      .accounts({ admin: admin.publicKey, proposal: earlyClosePda, systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    await program.methods
+      .registerVoter([...commitment])
+      .accounts({ admin: admin.publicKey, proposal: earlyClosePda, systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    await program.methods
+      .openVoting()
+      .accounts({ admin: admin.publicKey, proposal: earlyClosePda })
+      .rpc();
+
+    try {
+      await program.methods
+        .closeVoting()
+        .accounts({ closer: admin.publicKey, proposal: earlyClosePda })
+        .rpc();
+      assert.fail("Should have thrown");
+    } catch (err) {
+      assert.include(err.message, "VotingStillOpen");
+    }
+  });
+
+  it("Rejects reveal_vote with wrong randomness", async () => {
+    const now2 = Math.floor(Date.now() / 1000);
+    const cmTitle = "Commitment mismatch test";
+    const cmPda = getProposalPda(admin.publicKey, cmTitle);
+    const cmNullifier = Buffer.alloc(32, 0xef);
+    const cmNullifierPda = getNullifierPda(cmPda, cmNullifier);
+    const cmVoteRecordPda = getVoteRecordPda(cmPda, cmNullifier);
+    const cmRandomness = Buffer.alloc(32, 0x42);
+    const cmCommitment = computeVoteCommitment(1, cmRandomness);
+
+    await program.methods
+      .createProposal(cmTitle, description, new anchor.BN(now2 - 1), new anchor.BN(now2 + 2))
+      .accounts({ admin: admin.publicKey, proposal: cmPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    await program.methods
+      .registerVoter([...commitment])
+      .accounts({ admin: admin.publicKey, proposal: cmPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    await program.methods.openVoting()
+      .accounts({ admin: admin.publicKey, proposal: cmPda })
+      .rpc();
+
+    await program.methods
+      .castVote(proof, [...cmNullifier], [...cmCommitment])
+      .accounts({
+        voter: admin.publicKey, proposal: cmPda, vkAccount: vkPda,
+        nullifierRecord: cmNullifierPda, voteRecord: cmVoteRecordPda,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    await new Promise(r => setTimeout(r, 3000));
+    await program.methods.closeVoting()
+      .accounts({ closer: admin.publicKey, proposal: cmPda })
+      .rpc();
+
+    try {
+      // Wrong randomness — must be a valid BN254 field element (< p ≈ 0x30644e...).
+      // Using 1 (all-zeros with last byte = 1) is always safe and differs from cmRandomness.
+      const wrongRandomness = Buffer.alloc(32, 0);
+      wrongRandomness[31] = 0x01;
+      await program.methods
+        .revealVote(1, [...wrongRandomness])
+        .accounts({ revealer: admin.publicKey, proposal: cmPda, voteRecord: cmVoteRecordPda })
+        .rpc();
+      assert.fail("Should have thrown");
+    } catch (err) {
+      assert.include(err.message, "CommitmentMismatch");
+    }
+  });
+
+  it("Permits reveal by any account knowing the preimage", async () => {
+    // Reveal is permissionless — no voter identity stored on-chain.
+    // The commitment check Poseidon(vote, randomness) == vote_commitment is the
+    // sole authorization, preserving ZK anonymity.
+    const now3 = Math.floor(Date.now() / 1000);
+    const wvTitle = "Voter auth test";
+    const wvPda = getProposalPda(admin.publicKey, wvTitle);
+    const wvNullifier = Buffer.alloc(32, 0xcc);
+    const wvNullifierPda = getNullifierPda(wvPda, wvNullifier);
+    const wvVoteRecordPda = getVoteRecordPda(wvPda, wvNullifier);
+    const wvRandomness = Buffer.alloc(32, 0);
+    const wvCommitment = computeVoteCommitment(1, wvRandomness);
+
+    await program.methods
+      .createProposal(wvTitle, description, new anchor.BN(now3 - 1), new anchor.BN(now3 + 2))
+      .accounts({ admin: admin.publicKey, proposal: wvPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    await program.methods
+      .registerVoter([...commitment])
+      .accounts({ admin: admin.publicKey, proposal: wvPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    await program.methods.openVoting()
+      .accounts({ admin: admin.publicKey, proposal: wvPda })
+      .rpc();
+
+    await program.methods
+      .castVote(proof, [...wvNullifier], [...wvCommitment])
+      .accounts({
+        voter: admin.publicKey, proposal: wvPda, vkAccount: vkPda,
+        nullifierRecord: wvNullifierPda, voteRecord: wvVoteRecordPda,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    await new Promise(r => setTimeout(r, 3000));
+    await program.methods.closeVoting()
+      .accounts({ closer: admin.publicKey, proposal: wvPda })
+      .rpc();
+
+    // A third party who knows the preimage can reveal — no wallet link on-chain.
+    const relayer = anchor.web3.Keypair.generate();
+    const sig = await provider.connection.requestAirdrop(relayer.publicKey, anchor.web3.LAMPORTS_PER_SOL);
+    await provider.connection.confirmTransaction(sig);
+
+    await program.methods
+      .revealVote(1, [...wvRandomness])
+      .accounts({ revealer: relayer.publicKey, proposal: wvPda, voteRecord: wvVoteRecordPda })
+      .signers([relayer])
+      .rpc();
+
+    const voteRecord = await program.account.voteRecord.fetch(wvVoteRecordPda);
+    assert.equal(voteRecord.revealed, true);
+    assert.equal(voteRecord.vote, 1);
+  });
+
   it("Rejects finalize before close", async () => {
     const freshTitle = "Fresh proposal";
     const freshPda = getProposalPda(admin.publicKey, freshTitle);
+    const freshFutureEnd = Math.floor(Date.now() / 1000) + 3600;
 
     await program.methods
-      .createProposal(freshTitle, description, new anchor.BN(votingStart), new anchor.BN(votingEnd))
+      .createProposal(freshTitle, description, new anchor.BN(votingStart), new anchor.BN(freshFutureEnd))
       .accounts({
         admin: admin.publicKey,
         proposal: freshPda,
@@ -322,7 +516,7 @@ describe("solana_ballot", () => {
       await program.methods
         .finalizeTally()
         .accounts({
-          admin: admin.publicKey,
+          finalizer: admin.publicKey,
           proposal: freshPda,
         })
         .rpc();

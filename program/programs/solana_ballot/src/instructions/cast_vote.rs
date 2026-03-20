@@ -153,6 +153,7 @@ pub fn handler(
     let vote_record = &mut ctx.accounts.vote_record;
     vote_record.proposal_id = proposal.id;
     vote_record.vote_commitment = vote_commitment;
+    vote_record.nullifier = nullifier;
     vote_record.revealed = false;
     vote_record.vote = 0;
     vote_record.bump = ctx.bumps.vote_record;
@@ -171,7 +172,13 @@ pub struct CastVote<'info> {
     #[account(mut)]
     pub voter: Signer<'info>,
 
-    #[account(mut)]
+    /// Verified to be a program-derived Proposal account via seeds + bump.
+    /// Prevents a forged account from being passed as the proposal.
+    #[account(
+        mut,
+        seeds = [SEED_PROPOSAL, proposal.admin.as_ref(), proposal.title_seed.as_ref()],
+        bump = proposal.bump,
+    )]
     pub proposal: Account<'info, Proposal>,
 
     /// CHECK: Groth16 VK PDA. The PDA derivation is validated by the seeds

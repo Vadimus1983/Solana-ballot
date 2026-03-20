@@ -1,7 +1,12 @@
 use anchor_lang::prelude::*;
+use sha3::{Digest, Keccak256};
 use crate::state::proposal::{Proposal, ProposalStatus};
 use crate::error::BallotError;
 use crate::constants::*;
+
+fn keccak256(data: &[u8]) -> [u8; 32] {
+    Keccak256::digest(data).into()
+}
 
 pub fn handler(
     ctx: Context<CreateProposal>,
@@ -14,25 +19,30 @@ pub fn handler(
     require!(description.len() <= MAX_DESCRIPTION_LEN, BallotError::DescriptionTooLong);
     require!(voting_end > voting_start, BallotError::InvalidVotingPeriod);
 
-    // Capture key before mutable borrow
+    // Prevent proposals for periods that have already ended.
+    let clock = Clock::get()?;
+    require!(voting_end > clock.unix_timestamp, BallotError::InvalidVotingPeriod);
+
+    let title_seed = keccak256(title.as_bytes());
+
     let proposal_key = ctx.accounts.proposal.key();
     let proposal = &mut ctx.accounts.proposal;
 
-    // Use the PDA pubkey as proposal ID — unique by construction (admin + title seeds)
-    proposal.id = proposal_key.to_bytes();
-    proposal.admin = ctx.accounts.admin.key();
-    proposal.title = title;
-    proposal.description = description;
-    proposal.voting_start = voting_start;
-    proposal.voting_end = voting_end;
-    proposal.status = ProposalStatus::Registration;
-    proposal.merkle_root = [0u8; HASH_SIZE];
+    proposal.id            = proposal_key.to_bytes();
+    proposal.admin         = ctx.accounts.admin.key();
+    proposal.title         = title;
+    proposal.description   = description;
+    proposal.title_seed    = title_seed;
+    proposal.voting_start  = voting_start;
+    proposal.voting_end    = voting_end;
+    proposal.status        = ProposalStatus::Registration;
+    proposal.merkle_root   = [0u8; HASH_SIZE];
     proposal.merkle_frontier = [[0u8; HASH_SIZE]; MERKLE_DEPTH];
-    proposal.voter_count = 0;
-    proposal.vote_count = 0;
-    proposal.yes_count = 0;
-    proposal.no_count = 0;
-    proposal.bump = ctx.bumps.proposal;
+    proposal.voter_count   = 0;
+    proposal.vote_count    = 0;
+    proposal.yes_count     = 0;
+    proposal.no_count      = 0;
+    proposal.bump          = ctx.bumps.proposal;
 
     msg!("Proposal created: {:?}", proposal.title);
     Ok(())
@@ -51,7 +61,7 @@ pub struct CreateProposal<'info> {
         seeds = [
             SEED_PROPOSAL,
             admin.key().as_ref(),
-            &title.as_bytes()[..title.len().min(MAX_SEED_LEN)],
+            &keccak256(title.as_bytes()),
         ],
         bump
     )]

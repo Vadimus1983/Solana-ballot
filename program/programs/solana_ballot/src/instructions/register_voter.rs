@@ -9,7 +9,7 @@ pub fn handler(ctx: Context<RegisterVoter>, commitment: [u8; HASH_SIZE]) -> Resu
 
     require!(
         proposal.status == ProposalStatus::Registration,
-        BallotError::VotingAlreadyClosed
+        BallotError::NotInRegistration
     );
 
     // Insert commitment as a new leaf in the incremental Merkle tree.

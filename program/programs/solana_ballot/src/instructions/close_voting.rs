@@ -4,10 +4,18 @@ use crate::error::BallotError;
 
 pub fn handler(ctx: Context<CloseVoting>) -> Result<()> {
     let proposal = &mut ctx.accounts.proposal;
+    let clock = Clock::get()?;
 
     require!(
         proposal.status == ProposalStatus::Voting,
         BallotError::VotingNotOpen
+    );
+    // Anyone can trigger close once the agreed deadline has passed.
+    // The admin cannot close early. No single party can block close
+    // by disappearing — any account can call this after voting_end.
+    require!(
+        clock.unix_timestamp >= proposal.voting_end,
+        BallotError::VotingStillOpen
     );
 
     proposal.status = ProposalStatus::Closed;
@@ -18,12 +26,10 @@ pub fn handler(ctx: Context<CloseVoting>) -> Result<()> {
 
 #[derive(Accounts)]
 pub struct CloseVoting<'info> {
+    /// Any account may close voting once voting_end has passed.
     #[account(mut)]
-    pub admin: Signer<'info>,
+    pub closer: Signer<'info>,
 
-    #[account(
-        mut,
-        has_one = admin @ BallotError::Unauthorized,
-    )]
+    #[account(mut)]
     pub proposal: Account<'info, Proposal>,
 }

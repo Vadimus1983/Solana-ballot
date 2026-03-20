@@ -5,6 +5,7 @@ use crate::constants::*;
 pub struct VoteRecord {
     pub proposal_id: [u8; HASH_SIZE],
     pub vote_commitment: [u8; HASH_SIZE],
+    pub nullifier: [u8; HASH_SIZE],
     pub revealed: bool,
     pub vote: u8,   // 0 or 1, valid only when revealed = true
     pub bump: u8,
@@ -14,6 +15,7 @@ impl VoteRecord {
     pub const LEN: usize = ANCHOR_DISCRIMINATOR
         + HASH_SIZE     // proposal_id
         + HASH_SIZE     // vote_commitment
+        + HASH_SIZE     // nullifier
         + 1             // revealed
         + 1             // vote
         + 1;            // bump

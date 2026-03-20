@@ -69,20 +69,6 @@ pub fn poseidon2(left: &[u8; HASH_SIZE], right: &[u8; HASH_SIZE]) -> Result<[u8;
     }
 }
 
-/// Compute zero subtree hashes for all levels bottom-up.
-///
-/// - `zeros[0]` = `[0u8; 32]` (empty leaf)
-/// - `zeros[i]` = `Poseidon(zeros[i-1], zeros[i-1])` (empty subtree of depth i)
-///
-/// Each call costs MERKLE_DEPTH - 1 Poseidon invocations.
-fn compute_zeros() -> Result<[[u8; HASH_SIZE]; MERKLE_DEPTH]> {
-    let mut zeros = [[0u8; HASH_SIZE]; MERKLE_DEPTH];
-    for i in 1..MERKLE_DEPTH {
-        zeros[i] = poseidon2(&zeros[i - 1], &zeros[i - 1])?;
-    }
-    Ok(zeros)
-}
-
 /// Insert a new leaf into the incremental Merkle tree.
 ///
 /// Updates `frontier` in-place and returns the new Merkle root.
@@ -107,18 +93,25 @@ pub fn insert_leaf(
         BallotError::TreeFull
     );
 
-    let zeros = compute_zeros()?;
     let mut current = leaf;
     let mut index = leaf_index;
+    // zeros[i] = Poseidon(zeros[i-1], zeros[i-1]); computed lazily level by level.
+    // zeros[0] = [0u8; 32] (empty leaf).
+    let mut zero = [0u8; HASH_SIZE];
 
     for i in 0..MERKLE_DEPTH {
         if index % 2 == 0 {
-            // Left child: save in frontier, pair with zero right sibling
+            // Left child: pair current with the zero subtree at this level.
             frontier[i] = current;
-            current = poseidon2(&current, &zeros[i])?;
+            current = poseidon2(&current, &zero)?;
         } else {
-            // Right child: pair with stored left sibling
+            // Right child: pair with the stored left sibling.
             current = poseidon2(&frontier[i], &current)?;
+        }
+        // Advance zero to the next level: zeros[i+1] = Poseidon(zeros[i], zeros[i]).
+        // Skipped on the last iteration — no level i+1 exists.
+        if i + 1 < MERKLE_DEPTH {
+            zero = poseidon2(&zero, &zero)?;
         }
         index >>= 1;
     }

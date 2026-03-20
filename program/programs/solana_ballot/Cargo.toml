@@ -21,8 +21,9 @@ custom-panic = []
 
 
 [dependencies]
-anchor-lang           = "0.32.0"
+anchor-lang           = { version = "0.32.0", features = ["init-if-needed"] }
 groth16-solana        = "0.2"    # Groth16 verifier using Solana alt_bn128 syscalls
+sha3                  = { version = "0.10", default-features = false }  # Keccak-256 for PDA seeds (BPF-compatible, no_std)
 # Poseidon hash:
 #   - On BPF target: sol_poseidon syscall via solana-define-syscall (zero stack allocation)
 #   - On native target: light-poseidon (for unit tests; no BPF stack limit applies)

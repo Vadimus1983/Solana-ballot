@@ -46,3 +46,5 @@ Thumbs.db
 /program/yarn.lock
 /program/Cargo.lock
 /circuits/Cargo.lock
+/client/package-lock.json
+/program/package-lock.json

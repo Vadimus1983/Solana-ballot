@@ -15,6 +15,9 @@ pub struct Proposal {
     /// Full description of what is being voted on (max 256 chars)
     pub description: String,
 
+    /// Keccak-256 hash of the full title — used as PDA seed to prevent collisions.
+    pub title_seed: [u8; HASH_SIZE],
+
     /// Unix timestamp when voting opens — voters cannot cast before this
     pub voting_start: i64,
 
@@ -55,6 +58,7 @@ impl Proposal {
         + PUBKEY_SIZE                              // admin
         + STRING_PREFIX_SIZE + MAX_TITLE_LEN       // title
         + STRING_PREFIX_SIZE + MAX_DESCRIPTION_LEN // description
+        + HASH_SIZE                                // title_seed
         + 8                                        // voting_start
         + 8                                        // voting_end
         + 1                                        // status

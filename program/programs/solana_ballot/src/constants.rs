@@ -45,3 +45,8 @@ pub const SEED_PROPOSAL: &[u8] = b"proposal";
 pub const SEED_NULLIFIER: &[u8] = b"nullifier";
 pub const SEED_VOTE: &[u8] = b"vote";
 pub const SEED_VK: &[u8] = b"vk";
+pub const SEED_CONFIG: &[u8] = b"config";
+
+/// Minimum time after voting_end before finalize_tally can run.
+/// Gives voters 24 hours to reveal after voting closes.
+pub const REVEAL_GRACE_PERIOD: i64 = 86_400;
