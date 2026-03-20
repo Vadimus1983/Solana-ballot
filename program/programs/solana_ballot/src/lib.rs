@@ -7,7 +7,7 @@ pub mod instructions;
 pub mod state;
 
 use instructions::{
-    initialize::*, create_proposal::*, register_voter::*,
+    initialize::*, create_proposal::*, register_voter::*, open_voting::*,
     cast_vote::*, close_voting::*, reveal_vote::*, finalize_tally::*,
 };
 
@@ -54,6 +54,21 @@ pub mod solana_ballot {
         commitment: [u8; HASH_SIZE],
     ) -> Result<()> {
         instructions::register_voter::handler(ctx, commitment)
+    }
+
+    /// Opens voting for a proposal, transitioning it from Registration → Voting.
+    ///
+    /// After this call, voters can submit ZK proofs via `cast_vote`.
+    /// The Merkle root is frozen at this point — no further voter registrations
+    /// are accepted, ensuring the eligibility tree is fixed for all proofs.
+    ///
+    /// # Guards
+    /// - Caller must be the proposal admin.
+    /// - Proposal must be in `Registration` status.
+    /// - Current time must be within the configured voting window.
+    /// - At least one voter must be registered.
+    pub fn open_voting(ctx: Context<OpenVoting>) -> Result<()> {
+        instructions::open_voting::handler(ctx)
     }
 
     /// Casts a private vote using a ZK proof.

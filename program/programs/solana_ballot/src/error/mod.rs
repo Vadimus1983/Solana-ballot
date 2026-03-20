@@ -40,4 +40,7 @@ pub enum BallotError {
 
     #[msg("Invalid voting period")]
     InvalidVotingPeriod,
+
+    #[msg("Proposal is not in Registration phase")]
+    NotInRegistration,
 }
