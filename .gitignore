@@ -19,3 +19,30 @@ target
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+# Anchor
+.anchor/
+program/.anchor/
+
+# Solana
+test-ledger/
+*.so
+
+# Node
+node_modules/
+.yarn/
+
+# Solana keypairs — never commit secrets
+id.json
+deploy-keypair.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+/program/yarn.lock
+/program/Cargo.lock
+/circuits/Cargo.lock

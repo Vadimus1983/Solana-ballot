@@ -1,0 +1,19 @@
+[package]
+name = "solana-ballot-circuits"
+version = "0.1.0"
+edition = "2021"
+
+# Core arkworks crates for writing R1CS circuits
+[dependencies]
+ark-ff        = "0.4"          # Finite field arithmetic
+ark-relations = "0.4"          # R1CS constraint system (ConstraintSynthesizer)
+ark-r1cs-std  = "0.4"          # High-level gadgets: FpVar, Boolean, etc.
+ark-crypto-primitives = { version = "0.4", features = ["sponge", "r1cs"] }
+                                 # Poseidon hash — native (sponge) + circuit gadget (r1cs)
+
+# Only needed in tests: proving system + curve + utilities
+[dev-dependencies]
+ark-bn254   = "0.4"            # BN254 curve — same as used by Groth16 on Solana
+ark-groth16 = "0.4"            # Groth16 prover / verifier
+ark-snark   = "0.4"            # SNARK trait (circuit_specific_setup, prove, verify)
+ark-std     = { version = "0.4", features = ["std"] }  # StdRng (CryptoRng) for Groth16 tests
