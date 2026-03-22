@@ -528,13 +528,79 @@ describe("solana_ballot", () => {
     }
   });
 
+  // ── finalize_tally overflow-safety tests ──────────────────────────────────
+  //
+  // These tests verify the guard logic that the saturating_add fix protects.
+  // Direct testing with extreme values (e.g. voting_end = i64::MAX) is not
+  // feasible in integration tests: close_voting requires
+  // clock.unix_timestamp >= voting_end, so a proposal with voting_end near
+  // i64::MAX can never be closed.  The tests below instead confirm that the
+  // conditions surrounding the saturating arithmetic evaluate correctly with
+  // normal values.
+  //
+  // NOTE: placed before store_vk so cast_vote still uses the dev bypass
+  // (VK absent → proof verification skipped).
+
+  it("Rejects finalize_tally when votes unrevealed and grace period not yet expired", async () => {
+    // vote_count=1, yes+no=0 → all_revealed = false (tests saturating_add on counts).
+    // voting_end just passed; REVEAL_GRACE_PERIOD (86_400 s) has not elapsed
+    // → grace_expired = false (tests saturating_add on voting_end).
+    // Both conditions false → must reject with VotingStillOpen.
+    const now4 = Math.floor(Date.now() / 1000);
+    const graceTitle = "Grace period test";
+    const gracePda = getProposalPda(admin.publicKey, graceTitle);
+    const graceNullifier = Buffer.alloc(32, 0xdd);
+    const graceNullifierPda = getNullifierPda(gracePda, graceNullifier);
+    const graceVoteRecordPda = getVoteRecordPda(gracePda, graceNullifier);
+    const graceCommitment = computeVoteCommitment(1, Buffer.alloc(32, 0));
+
+    await program.methods
+      .createProposal(graceTitle, description, new anchor.BN(now4 - 1), new anchor.BN(now4 + 2))
+      .accounts({ admin: admin.publicKey, proposal: gracePda, systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    await program.methods
+      .registerVoter([...Buffer.alloc(32, 9)])
+      .accounts({ admin: admin.publicKey, proposal: gracePda, systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    await program.methods.openVoting()
+      .accounts({ admin: admin.publicKey, proposal: gracePda, vkAccount: vkPda })
+      .rpc();
+
+    await program.methods
+      .castVote(proof, [...graceNullifier], [...graceCommitment])
+      .accounts({
+        voter: admin.publicKey, proposal: gracePda, vkAccount: vkPda,
+        nullifierRecord: graceNullifierPda, voteRecord: graceVoteRecordPda,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    // Wait for voting_end, then close.
+    await new Promise(r => setTimeout(r, 3000));
+    await program.methods.closeVoting()
+      .accounts({ closer: admin.publicKey, proposal: gracePda })
+      .rpc();
+
+    // Immediately attempt finalize — grace period has not elapsed.
+    try {
+      await program.methods.finalizeTally()
+        .accounts({ finalizer: admin.publicKey, proposal: gracePda })
+        .rpc();
+      assert.fail("Should have thrown");
+    } catch (err) {
+      assert.include(err.message, "VotingStillOpen");
+    }
+  });
+
   // ── open_voting VK gate tests ──────────────────────────────────────────────
   //
-  // These three tests cover the fix for HIGH-2: open_voting now requires the
-  // vk_account PDA to be passed. The seeds constraint is always enforced
-  // (wrong address → rejected before the handler runs). The is_initialized
-  // check only fires in production builds; dev builds allow opening without a
-  // VK so anchor test works without a real trusted-setup ceremony.
+  // These three tests cover open_voting requiring the vk_account PDA.
+  // The seeds constraint is always enforced (wrong address → rejected before
+  // the handler runs). The is_initialized check only fires in production
+  // builds; dev builds allow opening without a VK so anchor test works
+  // without a real trusted-setup ceremony.
   //
   // NOTE: store_vk uses `init`, so it can only be called once per deployment.
   // These tests are placed last so earlier cast_vote tests can rely on the

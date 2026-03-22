@@ -16,8 +16,13 @@ pub fn handler(ctx: Context<FinalizeTally>) -> Result<()> {
     // Finalization is allowed when either:
     //   a) All cast votes have been revealed (yes + no == vote_count), OR
     //   b) The reveal grace period after voting_end has expired.
-    let all_revealed = proposal.yes_count + proposal.no_count >= proposal.vote_count;
-    let grace_expired = clock.unix_timestamp >= proposal.voting_end + REVEAL_GRACE_PERIOD;
+    // Use saturating arithmetic to prevent overflow panics.
+    // yes_count + no_count is bounded by the Merkle tree capacity (2^20) but
+    // saturating_add is a cheap, future-proof guard.
+    // voting_end + REVEAL_GRACE_PERIOD uses saturating_add so a maliciously
+    // crafted voting_end (e.g. i64::MAX) does not wrap and cause a DoS abort.
+    let all_revealed = proposal.yes_count.saturating_add(proposal.no_count) >= proposal.vote_count;
+    let grace_expired = clock.unix_timestamp >= proposal.voting_end.saturating_add(REVEAL_GRACE_PERIOD);
 
     require!(all_revealed || grace_expired, BallotError::VotingStillOpen);
 
