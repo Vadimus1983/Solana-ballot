@@ -648,9 +648,10 @@ describe("solana_ballot", () => {
   // builds; dev builds allow opening without a VK so anchor test works
   // without a real trusted-setup ceremony.
   //
-  // NOTE: store_vk uses `init`, so it can only be called once per deployment.
-  // These tests are placed last so earlier cast_vote tests can rely on the
-  // dev bypass (VK absent → proof verification skipped).
+  // NOTE: store_vk uses `init_if_needed` + is_initialized guard, so it can
+  // only write data once per deployment. These tests are placed last so
+  // earlier cast_vote tests can rely on the dev bypass (VK absent →
+  // proof verification skipped).
 
   it("Rejects open_voting when vk_account PDA is wrong", async () => {
     // Anchor validates account seeds before the handler runs.
@@ -731,5 +732,30 @@ describe("solana_ballot", () => {
 
     const proposal = await program.account.proposal.fetch(initVkPda);
     assert.deepEqual(proposal.status, { voting: {} });
+  });
+
+  it("Rejects a second store_vk call (reinitialization guard)", async () => {
+    // vkPda is already initialized from "Stores the verifying key".
+    // A second call must be rejected by the is_initialized guard in the
+    // handler, even though init_if_needed would otherwise succeed at the
+    // account-constraint level.
+    const zeroG1 = Array(64).fill(0);
+    const zeroG2 = Array(128).fill(0);
+    const zeroIc = Array(5).fill(null).map(() => Array(64).fill(0));
+
+    try {
+      await program.methods
+        .storeVk(zeroG1, zeroG2, zeroG2, zeroG2, zeroIc)
+        .accounts({
+          admin: admin.publicKey,
+          programConfig: programConfigPda,
+          vkAccount: vkPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .rpc();
+      assert.fail("Should have thrown");
+    } catch (err) {
+      assert.include(err.message, "VkAlreadyInitialized");
+    }
   });
 });

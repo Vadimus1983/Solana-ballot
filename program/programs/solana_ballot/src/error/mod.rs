@@ -52,4 +52,7 @@ pub enum BallotError {
 
     #[msg("Verification key not initialized — call store_vk first")]
     VkNotInitialized,
+
+    #[msg("Verification key is already initialized and cannot be replaced")]
+    VkAlreadyInitialized,
 }

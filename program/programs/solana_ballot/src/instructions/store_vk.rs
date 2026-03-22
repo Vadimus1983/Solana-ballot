@@ -7,9 +7,15 @@ use crate::constants::*;
 /// Stores the Groth16 prepared verifying key on-chain.
 ///
 /// Gated to the program authority stored in `ProgramConfig` (set by `initialize`).
-/// The VK account uses `init` (not `init_if_needed`) so it can only be written once.
-/// Replacing the VK mid-election would invalidate all already-cast proofs, so
-/// immutability is the correct security model.
+///
+/// Uses `init_if_needed` so that a pre-funded (squatted) PDA — an attacker sending
+/// lamports to the deterministic VK address before this instruction is called — does
+/// not block initialization. `init_if_needed` calls `allocate`+`assign` when the
+/// account already has lamports but no data, recovering it transparently.
+///
+/// The single-write invariant previously provided by `init` is enforced explicitly:
+/// the handler rejects any call where `is_initialized` is already true, preventing
+/// mid-election key replacement.
 #[allow(clippy::too_many_arguments)]
 pub fn handler(
     ctx: Context<StoreVk>,
@@ -20,6 +26,10 @@ pub fn handler(
     vk_ic: [[u8; PROOF_A_SIZE]; NUM_PUBLIC_INPUTS + 1],
 ) -> Result<()> {
     let vk_account = &mut ctx.accounts.vk_account;
+
+    // Enforce single-write: reject if the VK was already stored.
+    // This replaces the guarantee previously provided by `init` alone.
+    require!(!vk_account.is_initialized, BallotError::VkAlreadyInitialized);
 
     vk_account.admin = ctx.accounts.admin.key();
     vk_account.vk_alpha_g1 = vk_alpha_g1;
@@ -49,10 +59,11 @@ pub struct StoreVk<'info> {
     pub program_config: Account<'info, ProgramConfig>,
 
     /// PDA holding the verifying key — one per program deployment.
-    /// `init` ensures the VK is written exactly once; a second call fails with
-    /// AccountAlreadyInitialized, preventing mid-election key replacement.
+    /// `init_if_needed` recovers a squatted (pre-funded) PDA without error.
+    /// The single-write invariant is enforced by the `is_initialized` check
+    /// in the handler, preventing mid-election key replacement.
     #[account(
-        init,
+        init_if_needed,
         payer = admin,
         space = VerificationKeyAccount::LEN,
         seeds = [SEED_VK],
