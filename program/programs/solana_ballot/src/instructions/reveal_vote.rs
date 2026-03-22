@@ -47,7 +47,11 @@ pub struct RevealVote<'info> {
     /// identity is stored on-chain. The commitment check is the authorization.
     pub revealer: Signer<'info>,
 
-    #[account(mut)]
+    #[account(
+        mut,
+        seeds = [SEED_PROPOSAL, proposal.admin.as_ref(), proposal.title_seed.as_ref()],
+        bump = proposal.bump,
+    )]
     pub proposal: Account<'info, Proposal>,
 
     // Seeds include the nullifier so each voter has a unique, unlinkable record.

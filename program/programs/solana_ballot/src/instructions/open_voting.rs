@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use crate::state::proposal::{Proposal, ProposalStatus};
 use crate::state::vk::VerificationKeyAccount;
 use crate::error::BallotError;
-use crate::constants::SEED_VK;
+use crate::constants::{SEED_PROPOSAL, SEED_VK};
 
 /// Transitions the proposal from Registration → Voting.
 ///
@@ -89,6 +89,8 @@ pub struct OpenVoting<'info> {
     #[account(
         mut,
         has_one = admin @ BallotError::Unauthorized,
+        seeds = [SEED_PROPOSAL, proposal.admin.as_ref(), proposal.title_seed.as_ref()],
+        bump = proposal.bump,
     )]
     pub proposal: Account<'info, Proposal>,
 

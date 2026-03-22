@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use crate::state::proposal::{Proposal, ProposalStatus};
 use crate::error::BallotError;
-use crate::constants::REVEAL_GRACE_PERIOD;
+use crate::constants::{REVEAL_GRACE_PERIOD, SEED_PROPOSAL};
 
 pub fn handler(ctx: Context<FinalizeTally>) -> Result<()> {
     let proposal = &mut ctx.accounts.proposal;
@@ -52,6 +52,10 @@ pub struct FinalizeTally<'info> {
     /// Any account may finalize once all votes are revealed or the grace period expires.
     pub finalizer: Signer<'info>,
 
-    #[account(mut)]
+    #[account(
+        mut,
+        seeds = [SEED_PROPOSAL, proposal.admin.as_ref(), proposal.title_seed.as_ref()],
+        bump = proposal.bump,
+    )]
     pub proposal: Account<'info, Proposal>,
 }

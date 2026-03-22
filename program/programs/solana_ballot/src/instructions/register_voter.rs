@@ -49,6 +49,8 @@ pub struct RegisterVoter<'info> {
     #[account(
         mut,
         has_one = admin @ BallotError::Unauthorized,
+        seeds = [SEED_PROPOSAL, proposal.admin.as_ref(), proposal.title_seed.as_ref()],
+        bump = proposal.bump,
     )]
     pub proposal: Account<'info, Proposal>,
 

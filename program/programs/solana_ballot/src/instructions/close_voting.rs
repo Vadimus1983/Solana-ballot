@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 use crate::state::proposal::{Proposal, ProposalStatus};
 use crate::error::BallotError;
+use crate::constants::SEED_PROPOSAL;
 
 pub fn handler(ctx: Context<CloseVoting>) -> Result<()> {
     let proposal = &mut ctx.accounts.proposal;
@@ -29,6 +30,10 @@ pub struct CloseVoting<'info> {
     /// Any account may close voting once voting_end has passed.
     pub closer: Signer<'info>,
 
-    #[account(mut)]
+    #[account(
+        mut,
+        seeds = [SEED_PROPOSAL, proposal.admin.as_ref(), proposal.title_seed.as_ref()],
+        bump = proposal.bump,
+    )]
     pub proposal: Account<'info, Proposal>,
 }
