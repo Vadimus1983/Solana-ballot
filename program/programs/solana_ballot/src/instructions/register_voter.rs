@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 use crate::state::proposal::{Proposal, ProposalStatus};
+use crate::state::vote::CommitmentRecord;
 use crate::error::BallotError;
 use crate::constants::*;
 use crate::merkle::insert_leaf;
@@ -11,6 +12,11 @@ pub fn handler(ctx: Context<RegisterVoter>, commitment: [u8; HASH_SIZE]) -> Resu
         proposal.status == ProposalStatus::Registration,
         BallotError::NotInRegistration
     );
+
+    // commitment_record is initialized via `init`. If the same commitment has
+    // already been registered for this proposal, `init` fails because the PDA
+    // already exists — preventing Merkle tree slot exhaustion via duplicates.
+    ctx.accounts.commitment_record.bump = ctx.bumps.commitment_record;
 
     // Insert commitment as a new leaf in the incremental Merkle tree.
     // voter_count before incrementing is the index of the new leaf.
@@ -42,6 +48,7 @@ pub struct VoterRegistered {
 }
 
 #[derive(Accounts)]
+#[instruction(commitment: [u8; HASH_SIZE])]
 pub struct RegisterVoter<'info> {
     #[account(mut)]
     pub admin: Signer<'info>,
@@ -53,6 +60,18 @@ pub struct RegisterVoter<'info> {
         bump = proposal.bump,
     )]
     pub proposal: Account<'info, Proposal>,
+
+    // Uniqueness guard: creating this PDA proves the commitment is fresh for
+    // this proposal. A second call with the same commitment bytes fails because
+    // the account already exists, preventing duplicate tree insertions.
+    #[account(
+        init,
+        payer = admin,
+        space = CommitmentRecord::LEN,
+        seeds = [SEED_COMMITMENT, proposal.key().as_ref(), commitment.as_ref()],
+        bump,
+    )]
+    pub commitment_record: Account<'info, CommitmentRecord>,
 
     pub system_program: Program<'info, System>,
 }

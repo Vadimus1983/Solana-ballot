@@ -21,6 +21,17 @@ impl VoteRecord {
         + 1;            // bump
 }
 
+/// One account per (proposal, commitment) pair — its existence prevents the same
+/// commitment from being inserted into the Merkle tree more than once.
+#[account]
+pub struct CommitmentRecord {
+    pub bump: u8,
+}
+
+impl CommitmentRecord {
+    pub const LEN: usize = ANCHOR_DISCRIMINATOR + 1; // bump
+}
+
 /// One account per nullifier — its existence means the nullifier is spent
 #[account]
 pub struct NullifierRecord {

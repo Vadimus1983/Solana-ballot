@@ -1,6 +1,5 @@
 use anchor_lang::prelude::*;
 use crate::state::proposal::{Proposal, ProposalStatus};
-use crate::state::vk::VerificationKeyAccount;
 use crate::error::BallotError;
 use crate::constants::{SEED_PROPOSAL, SEED_VK};
 

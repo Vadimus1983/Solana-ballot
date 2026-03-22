@@ -99,6 +99,14 @@ describe("solana_ballot", () => {
     return pda;
   }
 
+  function getCommitmentRecordPda(proposal: anchor.web3.PublicKey, c: Buffer) {
+    const [pda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("commitment"), proposal.toBuffer(), c],
+      program.programId
+    );
+    return pda;
+  }
+
   // ── Happy path ────────────────────────────────────────────────────────────
 
   it("Initializes the program", async () => {
@@ -146,6 +154,7 @@ describe("solana_ballot", () => {
       .accounts({
         admin: admin.publicKey,
         proposal: proposalPda,
+        commitmentRecord: getCommitmentRecordPda(proposalPda, commitment),
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .rpc();
@@ -297,6 +306,7 @@ describe("solana_ballot", () => {
         .accounts({
           admin: attacker.publicKey,
           proposal: altPda,
+          commitmentRecord: getCommitmentRecordPda(altPda, Buffer.alloc(32, 2)),
           systemProgram: anchor.web3.SystemProgram.programId,
         })
         .signers([attacker])
@@ -304,6 +314,42 @@ describe("solana_ballot", () => {
       assert.fail("Should have thrown");
     } catch (err) {
       assert.ok(err, "Non-admin registration should be rejected");
+    }
+  });
+
+  it("Rejects duplicate voter commitment on the same proposal", async () => {
+    // The same commitment bytes registered twice on the same proposal must be
+    // rejected. The CommitmentRecord PDA (seeds: "commitment" + proposal + commitment)
+    // is created with `init` on the first call; the second call attempts to init
+    // the same PDA and fails because it already exists.
+    const dupTitle = "Duplicate commitment test";
+    const dupPda = getProposalPda(admin.publicKey, dupTitle);
+    // First byte must be < 0x30 (BN254 field prime leading byte) so the value
+    // is a valid Poseidon field element. 0x02 satisfies this.
+    const dupCommitment = Buffer.alloc(32, 0x02);
+    const dupCommitmentRecordPda = getCommitmentRecordPda(dupPda, dupCommitment);
+    const futureEnd = Math.floor(Date.now() / 1000) + 3600;
+
+    await program.methods
+      .createProposal(dupTitle, description, new anchor.BN(votingStart), new anchor.BN(futureEnd))
+      .accounts({ admin: admin.publicKey, proposal: dupPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    // First registration — must succeed.
+    await program.methods
+      .registerVoter([...dupCommitment])
+      .accounts({ admin: admin.publicKey, proposal: dupPda, commitmentRecord: dupCommitmentRecordPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    // Second registration with identical commitment — must fail.
+    try {
+      await program.methods
+        .registerVoter([...dupCommitment])
+        .accounts({ admin: admin.publicKey, proposal: dupPda, commitmentRecord: dupCommitmentRecordPda, systemProgram: anchor.web3.SystemProgram.programId })
+        .rpc();
+      assert.fail("Should have thrown");
+    } catch (err) {
+      assert.ok(err, "Duplicate commitment should be rejected");
     }
   });
 
@@ -371,7 +417,7 @@ describe("solana_ballot", () => {
 
     await program.methods
       .registerVoter([...commitment])
-      .accounts({ admin: admin.publicKey, proposal: earlyClosePda, systemProgram: anchor.web3.SystemProgram.programId })
+      .accounts({ admin: admin.publicKey, proposal: earlyClosePda, commitmentRecord: getCommitmentRecordPda(earlyClosePda, commitment), systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
     await program.methods
@@ -407,7 +453,7 @@ describe("solana_ballot", () => {
 
     await program.methods
       .registerVoter([...commitment])
-      .accounts({ admin: admin.publicKey, proposal: cmPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .accounts({ admin: admin.publicKey, proposal: cmPda, commitmentRecord: getCommitmentRecordPda(cmPda, commitment), systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
     await program.methods.openVoting()
@@ -463,7 +509,7 @@ describe("solana_ballot", () => {
 
     await program.methods
       .registerVoter([...commitment])
-      .accounts({ admin: admin.publicKey, proposal: wvPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .accounts({ admin: admin.publicKey, proposal: wvPda, commitmentRecord: getCommitmentRecordPda(wvPda, commitment), systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
     await program.methods.openVoting()
@@ -561,7 +607,7 @@ describe("solana_ballot", () => {
 
     await program.methods
       .registerVoter([...Buffer.alloc(32, 9)])
-      .accounts({ admin: admin.publicKey, proposal: gracePda, systemProgram: anchor.web3.SystemProgram.programId })
+      .accounts({ admin: admin.publicKey, proposal: gracePda, commitmentRecord: getCommitmentRecordPda(gracePda, Buffer.alloc(32, 9)), systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
     await program.methods.openVoting()
@@ -621,7 +667,7 @@ describe("solana_ballot", () => {
 
     await program.methods
       .registerVoter([...Buffer.alloc(32, 7)])
-      .accounts({ admin: admin.publicKey, proposal: wrongVkPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .accounts({ admin: admin.publicKey, proposal: wrongVkPda, commitmentRecord: getCommitmentRecordPda(wrongVkPda, Buffer.alloc(32, 7)), systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
     try {
@@ -675,7 +721,7 @@ describe("solana_ballot", () => {
 
     await program.methods
       .registerVoter([...Buffer.alloc(32, 8)])
-      .accounts({ admin: admin.publicKey, proposal: initVkPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .accounts({ admin: admin.publicKey, proposal: initVkPda, commitmentRecord: getCommitmentRecordPda(initVkPda, Buffer.alloc(32, 8)), systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
     await program.methods
