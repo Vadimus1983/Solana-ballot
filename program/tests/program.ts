@@ -815,4 +815,65 @@ describe("solana_ballot", () => {
       assert.include(err.message, "VkAlreadyInitialized");
     }
   });
+
+  // ── Account closing tests ──────────────────────────────────────────────────
+  // Placed last so all preceding tests can still access proposalPda's accounts.
+
+  it("Rejects close_proposal before finalization", async () => {
+    const preTitle = "Pre-finalize close test";
+    const prePda = getProposalPda(admin.publicKey, preTitle);
+    const futureEnd = Math.floor(Date.now() / 1000) + 3600;
+
+    await program.methods
+      .createProposal(preTitle, description, new anchor.BN(votingStart), new anchor.BN(futureEnd))
+      .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: prePda, systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    try {
+      await program.methods
+        .closeProposal()
+        .accounts({ admin: admin.publicKey, proposal: prePda })
+        .rpc();
+      assert.fail("Should have thrown");
+    } catch (err) {
+      assert.include(err.message, "NotFinalized");
+    }
+  });
+
+  it("Closes vote accounts after finalization", async () => {
+    // proposalPda is Finalized; nullifierRecordPda and voteRecordPda were
+    // created during "Casts a vote". Closing them reclaims the rent.
+    await program.methods
+      .closeVoteAccounts()
+      .accounts({
+        closer: admin.publicKey,
+        proposal: proposalPda,
+        nullifierRecord: nullifierRecordPda,
+        voteRecord: voteRecordPda,
+      })
+      .rpc();
+
+    assert.isNull(
+      await provider.connection.getAccountInfo(nullifierRecordPda),
+      "NullifierRecord should be closed"
+    );
+    assert.isNull(
+      await provider.connection.getAccountInfo(voteRecordPda),
+      "VoteRecord should be closed"
+    );
+  });
+
+  it("Closes proposal after finalization", async () => {
+    await program.methods
+      .closeProposal()
+      .accounts({ admin: admin.publicKey, proposal: proposalPda })
+      .rpc();
+
+    try {
+      await program.account.proposal.fetch(proposalPda);
+      assert.fail("Should have thrown");
+    } catch (err) {
+      assert.ok(err, "Closed proposal account should not be fetchable");
+    }
+  });
 });

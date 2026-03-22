@@ -55,4 +55,7 @@ pub enum BallotError {
 
     #[msg("Verification key is already initialized and cannot be replaced")]
     VkAlreadyInitialized,
+
+    #[msg("Proposal is not yet finalized")]
+    NotFinalized,
 }

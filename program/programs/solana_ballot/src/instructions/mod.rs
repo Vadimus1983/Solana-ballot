@@ -7,3 +7,5 @@ pub mod cast_vote;
 pub mod close_voting;
 pub mod reveal_vote;
 pub mod finalize_tally;
+pub mod close_vote_accounts;
+pub mod close_proposal;

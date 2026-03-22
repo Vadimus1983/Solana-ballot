@@ -10,6 +10,7 @@ pub mod state;
 use instructions::{
     initialize::*, create_proposal::*, register_voter::*, open_voting::*,
     store_vk::*, cast_vote::*, close_voting::*, reveal_vote::*, finalize_tally::*,
+    close_vote_accounts::*, close_proposal::*,
 };
 
 declare_id!("2h52sCAKhKtBFdyTfa3XamcWXkZB6M3D7XknNNfkQivZ");
@@ -150,5 +151,18 @@ pub mod solana_ballot {
     /// Can only be called by the admin after voting is closed.
     pub fn finalize_tally(ctx: Context<FinalizeTally>) -> Result<()> {
         instructions::finalize_tally::handler(ctx)
+    }
+
+    /// Closes one NullifierRecord + VoteRecord pair for a finalized proposal,
+    /// returning the rent-exempt lamports to the caller.
+    /// Permissionless — any account may reclaim rent after finalization.
+    pub fn close_vote_accounts(ctx: Context<CloseVoteAccounts>) -> Result<()> {
+        instructions::close_vote_accounts::handler(ctx)
+    }
+
+    /// Closes a finalized Proposal account, returning rent to the admin.
+    /// All associated vote accounts should be closed first via `close_vote_accounts`.
+    pub fn close_proposal(ctx: Context<CloseProposal>) -> Result<()> {
+        instructions::close_proposal::handler(ctx)
     }
 }
