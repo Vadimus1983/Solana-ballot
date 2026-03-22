@@ -15,7 +15,7 @@ pub fn handler(ctx: Context<CloseVoting>) -> Result<()> {
     // The admin cannot close early. No single party can block close
     // by disappearing — any account can call this after voting_end.
     require!(
-        clock.unix_timestamp >= proposal.voting_end,
+        proposal.voting_has_ended(clock.unix_timestamp),
         BallotError::VotingStillOpen
     );
 

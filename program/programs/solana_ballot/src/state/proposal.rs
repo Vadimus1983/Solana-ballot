@@ -53,6 +53,23 @@ pub struct Proposal {
 }
 
 impl Proposal {
+    /// Returns true when the voting window has closed (`now >= voting_end`).
+    pub fn voting_has_ended(&self, now: i64) -> bool {
+        now >= self.voting_end
+    }
+
+    /// Returns true when the reveal grace period has expired.
+    /// Uses saturating addition so a near-`i64::MAX` voting_end never panics.
+    pub fn grace_period_expired(&self, now: i64) -> bool {
+        now >= self.voting_end.saturating_add(REVEAL_GRACE_PERIOD)
+    }
+
+    /// Returns true when every cast vote has been revealed.
+    /// Uses saturating addition so extreme counts never panic.
+    pub fn all_votes_revealed(&self) -> bool {
+        self.yes_count.saturating_add(self.no_count) >= self.vote_count
+    }
+
     pub const LEN: usize = ANCHOR_DISCRIMINATOR
         + HASH_SIZE                                // id
         + PUBKEY_SIZE                              // admin

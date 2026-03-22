@@ -7,7 +7,7 @@ pub struct VoteRecord {
     pub vote_commitment: [u8; HASH_SIZE],
     pub nullifier: [u8; HASH_SIZE],
     pub revealed: bool,
-    pub vote: u8,   // 0 or 1, valid only when revealed = true
+    pub vote: u8,   // 0=No, 1=Yes when revealed=true; VOTE_UNREVEALED (0xFF) otherwise
     pub bump: u8,
 }
 

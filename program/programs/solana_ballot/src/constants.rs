@@ -57,6 +57,11 @@ pub const REVEAL_GRACE_PERIOD: i64 = 86_400;
 /// allowing arbitrarily stale start times.
 pub const MAX_VOTING_START_DRIFT: i64 = 60;
 
+/// Sentinel stored in VoteRecord.vote before the vote is revealed.
+/// Valid votes are 0 (No) or 1 (Yes); 0xFF is out of range and unambiguous.
+/// Indexers must check VoteRecord.revealed == true before reading .vote.
+pub const VOTE_UNREVEALED: u8 = 0xFF;
+
 /// Maximum allowed voting window (voting_end - voting_start).
 /// Caps storage occupancy and prevents indefinitely open elections.
 /// 30 days in seconds.

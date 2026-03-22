@@ -163,7 +163,9 @@ pub fn handler(
     vote_record.vote_commitment = vote_commitment;
     vote_record.nullifier = nullifier;
     vote_record.revealed = false;
-    vote_record.vote = 0;
+    // Use sentinel 0xFF — not a valid vote value (0=No, 1=Yes) — so indexers
+    // that read .vote without checking .revealed get an unambiguous signal.
+    vote_record.vote = VOTE_UNREVEALED;
     vote_record.bump = ctx.bumps.vote_record;
 
     proposal.vote_count += 1;

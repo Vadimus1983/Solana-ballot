@@ -206,6 +206,9 @@ describe("solana_ballot", () => {
 
     const voteRecord = await program.account.voteRecord.fetch(voteRecordPda);
     assert.equal(voteRecord.revealed, false);
+    // Before reveal, .vote must be the sentinel 0xFF — not 0 (No) — so indexers
+    // reading .vote without checking .revealed get an unambiguous signal.
+    assert.equal(voteRecord.vote, 255);
   });
 
   it("Closes voting", async () => {
