@@ -57,6 +57,11 @@ pub const REVEAL_GRACE_PERIOD: i64 = 86_400;
 /// allowing arbitrarily stale start times.
 pub const MAX_VOTING_START_DRIFT: i64 = 60;
 
+/// Maximum allowed voting window (voting_end - voting_start).
+/// Caps storage occupancy and prevents indefinitely open elections.
+/// 30 days in seconds.
+pub const MAX_VOTING_DURATION: i64 = 30 * 24 * 60 * 60; // 2_592_000
+
 /// Expected program authority for initialize.
 /// All-zeros = no restriction (safe default for testing / local development).
 /// Set to your deployment wallet's 32-byte public key before production deploy

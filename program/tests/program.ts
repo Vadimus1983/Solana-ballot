@@ -136,6 +136,7 @@ describe("solana_ballot", () => {
       .createProposal(title, description, new anchor.BN(votingStart), new anchor.BN(votingEnd))
       .accounts({
         admin: admin.publicKey,
+        programConfig: programConfigPda,
         proposal: proposalPda,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
@@ -269,6 +270,7 @@ describe("solana_ballot", () => {
         .createProposal(longTitle, description, new anchor.BN(votingStart), new anchor.BN(votingEnd))
         .accounts({
           admin: admin.publicKey,
+          programConfig: programConfigPda,
           proposal: pda,
           systemProgram: anchor.web3.SystemProgram.programId,
         })
@@ -276,6 +278,58 @@ describe("solana_ballot", () => {
       assert.fail("Should have thrown");
     } catch (err) {
       assert.include(err.message, "TitleTooLong");
+    }
+  });
+
+  it("Rejects create_proposal from non-authority wallet", async () => {
+    const attacker = anchor.web3.Keypair.generate();
+    const sig = await provider.connection.requestAirdrop(
+      attacker.publicKey,
+      anchor.web3.LAMPORTS_PER_SOL
+    );
+    await provider.connection.confirmTransaction(sig);
+
+    const spamTitle = "Spam proposal";
+    const spamPda = getProposalPda(attacker.publicKey, spamTitle);
+    const futureEnd = Math.floor(Date.now() / 1000) + 3600;
+
+    try {
+      await program.methods
+        .createProposal(spamTitle, description, new anchor.BN(votingStart), new anchor.BN(futureEnd))
+        .accounts({
+          admin: attacker.publicKey,
+          programConfig: programConfigPda,
+          proposal: spamPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([attacker])
+        .rpc();
+      assert.fail("Should have thrown");
+    } catch (err) {
+      assert.include(err.message, "Unauthorized");
+    }
+  });
+
+  it("Rejects create_proposal with voting window exceeding MAX_VOTING_DURATION", async () => {
+    // 31 days > 30-day cap → InvalidVotingPeriod
+    const longWindowTitle = "Long window proposal";
+    const longWindowPda = getProposalPda(admin.publicKey, longWindowTitle);
+    const now = Math.floor(Date.now() / 1000);
+    const tooLongEnd = now + 31 * 24 * 60 * 60;
+
+    try {
+      await program.methods
+        .createProposal(longWindowTitle, description, new anchor.BN(now - 1), new anchor.BN(tooLongEnd))
+        .accounts({
+          admin: admin.publicKey,
+          programConfig: programConfigPda,
+          proposal: longWindowPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .rpc();
+      assert.fail("Should have thrown");
+    } catch (err) {
+      assert.include(err.message, "InvalidVotingPeriod");
     }
   });
 
@@ -288,6 +342,7 @@ describe("solana_ballot", () => {
       .createProposal(altTitle, description, new anchor.BN(votingStart), new anchor.BN(altFutureEnd))
       .accounts({
         admin: admin.publicKey,
+        programConfig: programConfigPda,
         proposal: altPda,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
@@ -332,7 +387,7 @@ describe("solana_ballot", () => {
 
     await program.methods
       .createProposal(dupTitle, description, new anchor.BN(votingStart), new anchor.BN(futureEnd))
-      .accounts({ admin: admin.publicKey, proposal: dupPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: dupPda, systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
     // First registration — must succeed.
@@ -362,6 +417,7 @@ describe("solana_ballot", () => {
       .createProposal(emptyTitle, description, new anchor.BN(votingStart), new anchor.BN(emptyFutureEnd))
       .accounts({
         admin: admin.publicKey,
+        programConfig: programConfigPda,
         proposal: emptyPda,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
@@ -412,7 +468,7 @@ describe("solana_ballot", () => {
 
     await program.methods
       .createProposal(earlyCloseTitle, description, new anchor.BN(votingStart), new anchor.BN(futureEnd))
-      .accounts({ admin: admin.publicKey, proposal: earlyClosePda, systemProgram: anchor.web3.SystemProgram.programId })
+      .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: earlyClosePda, systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
     await program.methods
@@ -448,7 +504,7 @@ describe("solana_ballot", () => {
 
     await program.methods
       .createProposal(cmTitle, description, new anchor.BN(now2 - 1), new anchor.BN(now2 + 2))
-      .accounts({ admin: admin.publicKey, proposal: cmPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: cmPda, systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
     await program.methods
@@ -504,7 +560,7 @@ describe("solana_ballot", () => {
 
     await program.methods
       .createProposal(wvTitle, description, new anchor.BN(now3 - 1), new anchor.BN(now3 + 2))
-      .accounts({ admin: admin.publicKey, proposal: wvPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: wvPda, systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
     await program.methods
@@ -555,6 +611,7 @@ describe("solana_ballot", () => {
       .createProposal(freshTitle, description, new anchor.BN(votingStart), new anchor.BN(freshFutureEnd))
       .accounts({
         admin: admin.publicKey,
+        programConfig: programConfigPda,
         proposal: freshPda,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
@@ -602,7 +659,7 @@ describe("solana_ballot", () => {
 
     await program.methods
       .createProposal(graceTitle, description, new anchor.BN(now4 - 1), new anchor.BN(now4 + 2))
-      .accounts({ admin: admin.publicKey, proposal: gracePda, systemProgram: anchor.web3.SystemProgram.programId })
+      .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: gracePda, systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
     await program.methods
@@ -663,7 +720,7 @@ describe("solana_ballot", () => {
 
     await program.methods
       .createProposal(wrongVkTitle, description, new anchor.BN(votingStart), new anchor.BN(futureEnd))
-      .accounts({ admin: admin.publicKey, proposal: wrongVkPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: wrongVkPda, systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
     await program.methods
@@ -717,7 +774,7 @@ describe("solana_ballot", () => {
 
     await program.methods
       .createProposal(initVkTitle, description, new anchor.BN(votingStart), new anchor.BN(futureEnd))
-      .accounts({ admin: admin.publicKey, proposal: initVkPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: initVkPda, systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
     await program.methods

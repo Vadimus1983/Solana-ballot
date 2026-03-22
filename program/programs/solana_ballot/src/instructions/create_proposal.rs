@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 use sha3::{Digest, Keccak256};
 use crate::state::proposal::{Proposal, ProposalStatus};
+use crate::state::program_config::ProgramConfig;
 use crate::error::BallotError;
 use crate::constants::*;
 
@@ -18,6 +19,10 @@ pub fn handler(
     require!(title.len() <= MAX_TITLE_LEN, BallotError::TitleTooLong);
     require!(description.len() <= MAX_DESCRIPTION_LEN, BallotError::DescriptionTooLong);
     require!(voting_end > voting_start, BallotError::InvalidVotingPeriod);
+    require!(
+        voting_end - voting_start <= MAX_VOTING_DURATION,
+        BallotError::InvalidVotingPeriod
+    );
 
     let clock = Clock::get()?;
 
@@ -62,6 +67,14 @@ pub fn handler(
 pub struct CreateProposal<'info> {
     #[account(mut)]
     pub admin: Signer<'info>,
+
+    /// Only the program authority may create proposals.
+    #[account(
+        seeds = [SEED_CONFIG],
+        bump = program_config.bump,
+        constraint = program_config.authority == admin.key() @ BallotError::Unauthorized,
+    )]
+    pub program_config: Account<'info, ProgramConfig>,
 
     #[account(
         init,
