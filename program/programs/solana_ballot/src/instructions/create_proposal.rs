@@ -19,8 +19,17 @@ pub fn handler(
     require!(description.len() <= MAX_DESCRIPTION_LEN, BallotError::DescriptionTooLong);
     require!(voting_end > voting_start, BallotError::InvalidVotingPeriod);
 
-    // Prevent proposals for periods that have already ended.
     let clock = Clock::get()?;
+
+    // Reject start times that are more than MAX_VOTING_START_DRIFT seconds in the past.
+    // A small drift allowance accommodates transaction latency and clock skew; an
+    // arbitrarily stale voting_start (e.g. epoch 0) would be a configuration error.
+    require!(
+        voting_start >= clock.unix_timestamp - MAX_VOTING_START_DRIFT,
+        BallotError::InvalidVotingPeriod
+    );
+
+    // Prevent proposals for periods that have already ended.
     require!(voting_end > clock.unix_timestamp, BallotError::InvalidVotingPeriod);
 
     let title_seed = keccak256(title.as_bytes());

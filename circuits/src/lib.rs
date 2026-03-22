@@ -1,3 +1,6 @@
+pub mod ballot_validity;
+pub mod merkle_membership;
+pub mod nullifier;
 /// ZK circuits for the solana-ballot private voting system.
 ///
 /// Each circuit encodes one piece of the proof that a voter must produce
@@ -13,7 +16,4 @@
 /// | MerkleMembership  | commitment is a leaf in the eligibility Merkle tree | implemented |
 /// | VoteCommitment    | vote_commitment = Poseidon(vote, randomness)        | implemented |
 pub mod poseidon_params;
-pub mod ballot_validity;
-pub mod nullifier;
 pub mod vote_commitment;
-pub mod merkle_membership;

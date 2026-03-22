@@ -95,23 +95,26 @@ pub fn insert_leaf(
 
     let mut current = leaf;
     let mut index = leaf_index;
-    // zeros[i] = Poseidon(zeros[i-1], zeros[i-1]); computed lazily level by level.
-    // zeros[0] = [0u8; 32] (empty leaf).
-    let mut zero = [0u8; HASH_SIZE];
+    // zeros[i] = Poseidon(zeros[i-1], zeros[i-1]).  Computed lazily: only advanced
+    // when a left-child node actually needs to pair with the zero subtree at that
+    // level.  Right-child nodes pair with frontier[i] instead, so their zero hash
+    // is never needed and those Poseidon calls are skipped entirely.
+    let mut zero = [0u8; HASH_SIZE];   // starts as zeros[0]
+    let mut zero_level = 0usize;       // `zero` currently represents zeros[zero_level]
 
     for i in 0..MERKLE_DEPTH {
         if index % 2 == 0 {
             // Left child: pair current with the zero subtree at this level.
+            // Advance `zero` from `zero_level` to `i` on demand.
+            while zero_level < i {
+                zero = poseidon2(&zero, &zero)?;
+                zero_level += 1;
+            }
             frontier[i] = current;
             current = poseidon2(&current, &zero)?;
         } else {
-            // Right child: pair with the stored left sibling.
+            // Right child: pair with the stored left sibling — no zero hash needed.
             current = poseidon2(&frontier[i], &current)?;
-        }
-        // Advance zero to the next level: zeros[i+1] = Poseidon(zeros[i], zeros[i]).
-        // Skipped on the last iteration — no level i+1 exists.
-        if i + 1 < MERKLE_DEPTH {
-            zero = poseidon2(&zero, &zero)?;
         }
         index >>= 1;
     }

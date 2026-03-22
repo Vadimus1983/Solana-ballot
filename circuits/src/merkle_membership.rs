@@ -86,7 +86,11 @@ pub struct MerkleMembershipCircuit<F: PrimeField> {
 impl<F: PrimeField> ConstraintSynthesizer<F> for MerkleMembershipCircuit<F> {
     fn generate_constraints(self, cs: ConstraintSystemRef<F>) -> Result<(), SynthesisError> {
         assert_eq!(self.path.len(), DEPTH, "path length must equal DEPTH");
-        assert_eq!(self.path_indices.len(), DEPTH, "path_indices length must equal DEPTH");
+        assert_eq!(
+            self.path_indices.len(),
+            DEPTH,
+            "path_indices length must equal DEPTH"
+        );
 
         // ── Public input ─────────────────────────────────────────────────────
 
@@ -110,17 +114,15 @@ impl<F: PrimeField> ConstraintSynthesizer<F> for MerkleMembershipCircuit<F> {
 
         for i in 0..DEPTH {
             // Sibling hash at this level — private
-            let sibling = FpVar::new_witness(
-                ark_relations::ns!(cs, "sibling"),
-                || self.path[i].ok_or(SynthesisError::AssignmentMissing),
-            )?;
+            let sibling = FpVar::new_witness(ark_relations::ns!(cs, "sibling"), || {
+                self.path[i].ok_or(SynthesisError::AssignmentMissing)
+            })?;
 
             // Left/right indicator — private
             // Boolean gadget enforces this is 0 or 1 (adds its own binary constraint)
-            let is_right = Boolean::new_witness(
-                ark_relations::ns!(cs, "index"),
-                || self.path_indices[i].ok_or(SynthesisError::AssignmentMissing),
-            )?;
+            let is_right = Boolean::new_witness(ark_relations::ns!(cs, "index"), || {
+                self.path_indices[i].ok_or(SynthesisError::AssignmentMissing)
+            })?;
 
             // Conditionally place current and sibling in the correct order.
             // `is_right.select(a, b)` returns `a` when is_right=true, `b` when false.
@@ -220,7 +222,10 @@ mod tests {
         let cs = ConstraintSystem::<Fr>::new_ref();
         circuit.generate_constraints(cs.clone()).unwrap();
 
-        assert!(cs.is_satisfied().unwrap(), "Valid membership proof must satisfy the circuit");
+        assert!(
+            cs.is_satisfied().unwrap(),
+            "Valid membership proof must satisfy the circuit"
+        );
     }
 
     /// Wrong commitment (not in the tree) must not satisfy the circuit.
@@ -243,7 +248,10 @@ mod tests {
         .generate_constraints(cs.clone())
         .unwrap();
 
-        assert!(!cs.is_satisfied().unwrap(), "Wrong commitment must not satisfy the circuit");
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Wrong commitment must not satisfy the circuit"
+        );
     }
 
     /// Tampered sibling in the path must not satisfy the circuit.
@@ -267,7 +275,10 @@ mod tests {
         .generate_constraints(cs.clone())
         .unwrap();
 
-        assert!(!cs.is_satisfied().unwrap(), "Tampered path sibling must not satisfy the circuit");
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Tampered path sibling must not satisfy the circuit"
+        );
     }
 
     /// Wrong merkle_root must not satisfy the circuit.
@@ -285,7 +296,10 @@ mod tests {
         .generate_constraints(cs.clone())
         .unwrap();
 
-        assert!(!cs.is_satisfied().unwrap(), "Fake merkle_root must not satisfy the circuit");
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Fake merkle_root must not satisfy the circuit"
+        );
     }
 
     // ── Groth16 end-to-end ─────────────────────────────────────────────────
@@ -314,7 +328,10 @@ mod tests {
 
         // Verify — the Solana program provides [merkle_root] as the public input
         let valid = Groth16::<Bn254>::verify(&vk, &[root], &proof).unwrap();
-        assert!(valid, "Groth16 proof should verify with correct merkle_root");
+        assert!(
+            valid,
+            "Groth16 proof should verify with correct merkle_root"
+        );
     }
 
     /// A valid proof must not verify against a different (attacker-controlled) root.
@@ -337,6 +354,9 @@ mod tests {
 
         let attacker_root = Fr::from(0u64);
         let valid = Groth16::<Bn254>::verify(&vk, &[attacker_root], &proof).unwrap();
-        assert!(!valid, "Proof must not verify against an attacker-controlled root");
+        assert!(
+            !valid,
+            "Proof must not verify against an attacker-controlled root"
+        );
     }
 }

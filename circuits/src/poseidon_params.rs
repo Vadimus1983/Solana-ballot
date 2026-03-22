@@ -43,7 +43,7 @@ pub fn poseidon_config<F: PrimeField>() -> PoseidonConfig<F> {
     // find_poseidon_ark_and_mds takes u64 for rounds; PoseidonConfig uses usize.
     let (ark, mds) = find_poseidon_ark_and_mds::<F>(
         F::MODULUS_BIT_SIZE as u64,
-        rate,               // usize
+        rate, // usize
         full_rounds as u64,
         partial_rounds as u64,
         0u64,

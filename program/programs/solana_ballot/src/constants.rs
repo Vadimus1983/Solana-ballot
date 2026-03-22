@@ -50,3 +50,15 @@ pub const SEED_CONFIG: &[u8] = b"config";
 /// Minimum time after voting_end before finalize_tally can run.
 /// Gives voters 24 hours to reveal after voting closes.
 pub const REVEAL_GRACE_PERIOD: i64 = 86_400;
+
+/// How far in the past voting_start may be when create_proposal is called.
+/// A 60-second window accommodates transaction latency and clock skew without
+/// allowing arbitrarily stale start times.
+pub const MAX_VOTING_START_DRIFT: i64 = 60;
+
+/// Expected program authority for initialize.
+/// All-zeros = no restriction (safe default for testing / local development).
+/// Set to your deployment wallet's 32-byte public key before production deploy
+/// to close the front-running window between program deployment and initialization.
+pub const PROGRAM_AUTHORITY: [u8; 32] = [0u8; 32];
+

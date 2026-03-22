@@ -45,7 +45,6 @@ pub fn handler(ctx: Context<RevealVote>, vote: u8, randomness: [u8; HASH_SIZE]) 
 pub struct RevealVote<'info> {
     /// Any account may reveal a vote — anonymity is preserved because no voter
     /// identity is stored on-chain. The commitment check is the authorization.
-    #[account(mut)]
     pub revealer: Signer<'info>,
 
     #[account(mut)]

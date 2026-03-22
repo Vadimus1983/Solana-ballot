@@ -50,7 +50,6 @@ pub struct ProposalFinalized {
 #[derive(Accounts)]
 pub struct FinalizeTally<'info> {
     /// Any account may finalize once all votes are revealed or the grace period expires.
-    #[account(mut)]
     pub finalizer: Signer<'info>,
 
     #[account(mut)]

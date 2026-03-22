@@ -9,7 +9,11 @@ crate-type = ["cdylib", "lib"]
 name = "solana_ballot"
 
 [features]
-default = []
+# `dev` is a default feature that enables the proof-verification bypass for local testing.
+# For production deploy, always build with: anchor build --no-default-features
+# The build.rs script emits a visible warning reminding you of this on every dev build.
+default = ["dev"]
+dev = []                            # Enables proof-verification bypass when VK is absent
 cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-idl = []
@@ -21,7 +25,7 @@ custom-panic = []
 
 
 [dependencies]
-anchor-lang           = { version = "0.32.0", features = ["init-if-needed"] }
+anchor-lang           = { version = "0.32.0" }
 groth16-solana        = "0.2"    # Groth16 verifier using Solana alt_bn128 syscalls
 sha3                  = { version = "0.10", default-features = false }  # Keccak-256 for PDA seeds (BPF-compatible, no_std)
 # Poseidon hash:

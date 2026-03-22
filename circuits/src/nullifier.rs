@@ -158,7 +158,10 @@ mod tests {
             .generate_constraints(cs.clone())
             .unwrap();
 
-        assert!(cs.is_satisfied().unwrap(), "Valid inputs should satisfy the circuit");
+        assert!(
+            cs.is_satisfied().unwrap(),
+            "Valid inputs should satisfy the circuit"
+        );
     }
 
     /// Wrong secret_key must not satisfy the circuit (under-constrained check).
@@ -181,7 +184,10 @@ mod tests {
         .generate_constraints(cs.clone())
         .unwrap();
 
-        assert!(!cs.is_satisfied().unwrap(), "Wrong secret_key must not satisfy the circuit");
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Wrong secret_key must not satisfy the circuit"
+        );
     }
 
     /// Changing proposal_id must produce a different nullifier (replay attack prevention).
@@ -229,7 +235,10 @@ mod tests {
         .generate_constraints(cs.clone())
         .unwrap();
 
-        assert!(!cs.is_satisfied().unwrap(), "Fake nullifier must not satisfy the circuit");
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Fake nullifier must not satisfy the circuit"
+        );
     }
 
     // ── Groth16 end-to-end ─────────────────────────────────────────────────
@@ -264,7 +273,10 @@ mod tests {
         // This is what the Solana program does — it has both values and verifies the proof.
         let public_inputs = vec![nullifier, proposal_id];
         let valid = Groth16::<Bn254>::verify(&vk, &public_inputs, &proof).unwrap();
-        assert!(valid, "Groth16 proof should verify with correct public inputs");
+        assert!(
+            valid,
+            "Groth16 proof should verify with correct public inputs"
+        );
     }
 
     /// Verifying with the wrong proposal_id must fail, even with a valid proof.
@@ -285,13 +297,12 @@ mod tests {
         };
         let (pk, vk) = Groth16::<Bn254>::circuit_specific_setup(setup_circuit, &mut rng).unwrap();
 
-        let proof = Groth16::<Bn254>::prove(&pk, make_circuit(secret_key, proposal_id), &mut rng)
-            .unwrap();
+        let proof =
+            Groth16::<Bn254>::prove(&pk, make_circuit(secret_key, proposal_id), &mut rng).unwrap();
 
         // Swap proposal_id to a different one — verification must fail
         let wrong_proposal_id = Fr::from(999u64);
-        let valid =
-            Groth16::<Bn254>::verify(&vk, &[nullifier, wrong_proposal_id], &proof).unwrap();
+        let valid = Groth16::<Bn254>::verify(&vk, &[nullifier, wrong_proposal_id], &proof).unwrap();
         assert!(!valid, "Proof must not verify with a different proposal_id");
     }
 }

@@ -4,11 +4,12 @@ use crate::state::program_config::ProgramConfig;
 use crate::error::BallotError;
 use crate::constants::*;
 
-/// Stores (or updates) the Groth16 prepared verifying key on-chain.
+/// Stores the Groth16 prepared verifying key on-chain.
 ///
 /// Gated to the program authority stored in `ProgramConfig` (set by `initialize`).
-/// Using `init_if_needed` allows the authority to replace the VK after a
-/// re-ceremony without redeploying the program.
+/// The VK account uses `init` (not `init_if_needed`) so it can only be written once.
+/// Replacing the VK mid-election would invalidate all already-cast proofs, so
+/// immutability is the correct security model.
 #[allow(clippy::too_many_arguments)]
 pub fn handler(
     ctx: Context<StoreVk>,
@@ -48,9 +49,10 @@ pub struct StoreVk<'info> {
     pub program_config: Account<'info, ProgramConfig>,
 
     /// PDA holding the verifying key — one per program deployment.
-    /// `init_if_needed` allows the authority to update the VK after a re-ceremony.
+    /// `init` ensures the VK is written exactly once; a second call fails with
+    /// AccountAlreadyInitialized, preventing mid-election key replacement.
     #[account(
-        init_if_needed,
+        init,
         payer = admin,
         space = VerificationKeyAccount::LEN,
         seeds = [SEED_VK],

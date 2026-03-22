@@ -27,7 +27,6 @@ pub fn handler(ctx: Context<CloseVoting>) -> Result<()> {
 #[derive(Accounts)]
 pub struct CloseVoting<'info> {
     /// Any account may close voting once voting_end has passed.
-    #[account(mut)]
     pub closer: Signer<'info>,
 
     #[account(mut)]

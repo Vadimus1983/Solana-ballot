@@ -84,27 +84,42 @@ mod tests {
     #[test]
     fn test_vote_zero_is_valid() {
         let cs = ConstraintSystem::<Fr>::new_ref();
-        let circuit = BallotValidityCircuit { vote: Some(Fr::from(0u64)) };
+        let circuit = BallotValidityCircuit {
+            vote: Some(Fr::from(0u64)),
+        };
         circuit.generate_constraints(cs.clone()).unwrap();
-        assert!(cs.is_satisfied().unwrap(), "vote=0 should satisfy the constraint");
+        assert!(
+            cs.is_satisfied().unwrap(),
+            "vote=0 should satisfy the constraint"
+        );
     }
 
     /// vote = 1 must satisfy vote * (vote - 1) = 0
     #[test]
     fn test_vote_one_is_valid() {
         let cs = ConstraintSystem::<Fr>::new_ref();
-        let circuit = BallotValidityCircuit { vote: Some(Fr::from(1u64)) };
+        let circuit = BallotValidityCircuit {
+            vote: Some(Fr::from(1u64)),
+        };
         circuit.generate_constraints(cs.clone()).unwrap();
-        assert!(cs.is_satisfied().unwrap(), "vote=1 should satisfy the constraint");
+        assert!(
+            cs.is_satisfied().unwrap(),
+            "vote=1 should satisfy the constraint"
+        );
     }
 
     /// vote = 2 must NOT satisfy the constraint — if it did, tallying would be broken.
     #[test]
     fn test_vote_two_is_invalid() {
         let cs = ConstraintSystem::<Fr>::new_ref();
-        let circuit = BallotValidityCircuit { vote: Some(Fr::from(2u64)) };
+        let circuit = BallotValidityCircuit {
+            vote: Some(Fr::from(2u64)),
+        };
         circuit.generate_constraints(cs.clone()).unwrap();
-        assert!(!cs.is_satisfied().unwrap(), "vote=2 must NOT satisfy the constraint");
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "vote=2 must NOT satisfy the constraint"
+        );
     }
 
     /// vote = p-1 (largest field element) must NOT satisfy the constraint.
@@ -114,9 +129,14 @@ mod tests {
         // p - 1 is the largest element of the BN254 scalar field
         let field_max = Fr::from(-1i64); // -1 mod p = p - 1
         let cs = ConstraintSystem::<Fr>::new_ref();
-        let circuit = BallotValidityCircuit { vote: Some(field_max) };
+        let circuit = BallotValidityCircuit {
+            vote: Some(field_max),
+        };
         circuit.generate_constraints(cs.clone()).unwrap();
-        assert!(!cs.is_satisfied().unwrap(), "vote=field_max must NOT satisfy the constraint");
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "vote=field_max must NOT satisfy the constraint"
+        );
     }
 
     // ── Groth16 end-to-end tests ───────────────────────────────────────────
@@ -137,7 +157,9 @@ mod tests {
             Groth16::<Bn254>::circuit_specific_setup(circuit_for_setup, &mut rng).unwrap();
 
         // Step 2: generate proof for vote = 1
-        let circuit_for_proof = BallotValidityCircuit { vote: Some(Fr::from(1u64)) };
+        let circuit_for_proof = BallotValidityCircuit {
+            vote: Some(Fr::from(1u64)),
+        };
         let proof = Groth16::<Bn254>::prove(&pk, circuit_for_proof, &mut rng).unwrap();
 
         // Step 3: verify — BallotValidity has no public inputs (vote is fully private)
@@ -160,11 +182,16 @@ mod tests {
             Groth16::<Bn254>::circuit_specific_setup(circuit_for_setup, &mut rng).unwrap();
 
         // vote = 2 violates the constraint — the prover panics internally
-        let circuit_for_proof = BallotValidityCircuit { vote: Some(Fr::from(2u64)) };
+        let circuit_for_proof = BallotValidityCircuit {
+            vote: Some(Fr::from(2u64)),
+        };
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             Groth16::<Bn254>::prove(&pk, circuit_for_proof, &mut rng)
         }));
 
-        assert!(result.is_err(), "Groth16 must panic for an unsatisfied circuit");
+        assert!(
+            result.is_err(),
+            "Groth16 must panic for an unsatisfied circuit"
+        );
     }
 }

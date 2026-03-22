@@ -63,7 +63,8 @@ impl<F: PrimeField> ConstraintSynthesizer<F> for VoteCommitmentCircuit<F> {
         // ── Public input ─────────────────────────────────────────────────────
 
         let vote_commitment = FpVar::new_input(ark_relations::ns!(cs, "vote_commitment"), || {
-            self.vote_commitment.ok_or(SynthesisError::AssignmentMissing)
+            self.vote_commitment
+                .ok_or(SynthesisError::AssignmentMissing)
         })?;
 
         // ── Private witnesses ────────────────────────────────────────────────
@@ -178,7 +179,10 @@ mod tests {
         .generate_constraints(cs.clone())
         .unwrap();
 
-        assert!(!cs.is_satisfied().unwrap(), "vote=2 must fail the binary constraint");
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "vote=2 must fail the binary constraint"
+        );
     }
 
     /// Wrong randomness produces a different commitment — the circuit must not be satisfied.
@@ -200,7 +204,10 @@ mod tests {
         .generate_constraints(cs.clone())
         .unwrap();
 
-        assert!(!cs.is_satisfied().unwrap(), "Wrong randomness must not satisfy the circuit");
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Wrong randomness must not satisfy the circuit"
+        );
     }
 
     /// Tampered commitment (wrong value, correct vote and randomness) must fail.
@@ -216,7 +223,10 @@ mod tests {
         .generate_constraints(cs.clone())
         .unwrap();
 
-        assert!(!cs.is_satisfied().unwrap(), "Fake commitment must not satisfy the circuit");
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Fake commitment must not satisfy the circuit"
+        );
     }
 
     // ── Groth16 end-to-end ─────────────────────────────────────────────────

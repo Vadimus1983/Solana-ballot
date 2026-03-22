@@ -141,7 +141,15 @@ pub fn handler(
             )?;
         }
         None => {
-            msg!("WARNING: VK not initialized — proof verification skipped (development mode)");
+            // In production builds (compiled without the `dev` feature) the absence
+            // of an initialised VK is a hard error — votes cannot be cast without
+            // a valid verifying key.  The `dev` feature enables the bypass so that
+            // `anchor test` works without a real Groth16 trusted-setup ceremony.
+            #[cfg(feature = "dev")]
+            msg!("WARNING: VK not initialized — proof verification skipped (dev feature flag). \
+                  Build with --no-default-features for production.");
+            #[cfg(not(feature = "dev"))]
+            return err!(BallotError::VkNotInitialized);
         }
     }
 
