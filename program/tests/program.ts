@@ -912,15 +912,55 @@ describe("solana_ballot", () => {
     }
   });
 
+  it("Rejects store_vk with identity G1 point (all zeros)", async () => {
+    // All-zero G1 point is the group identity — not a valid VK component.
+    const identityG1 = Array(64).fill(0);  // (0,0) = identity
+    const validG2    = Array(128).fill(0); validG2[0] = 1; validG2[32] = 1; validG2[64] = 1; validG2[96] = 1;
+    const validIc    = Array(5).fill(null).map(() => { const ic = Array(64).fill(0); ic[0] = 1; ic[32] = 1; return ic; });
+
+    try {
+      await program.methods
+        .storeVk(identityG1, validG2, validG2, validG2, validIc)
+        .accounts({ admin: admin.publicKey, programConfig: programConfigPda, vkAccount: vkPda, systemProgram: anchor.web3.SystemProgram.programId })
+        .rpc();
+      assert.fail("Should have thrown");
+    } catch (err) {
+      assert.include(err.message, "InvalidVerificationKey");
+    }
+  });
+
+  it("Rejects store_vk with out-of-range G2 coordinate", async () => {
+    // A G2 component whose first coordinate chunk has first byte 0xff > 0x30
+    // (BN254 prime's first byte) is not a valid field element.
+    const validG1   = Array(64).fill(0); validG1[0] = 1; validG1[32] = 1;
+    const badG2     = Array(128).fill(0xff); // all bytes 0xff >> BN254 prime
+    const validG2   = Array(128).fill(0); validG2[0] = 1; validG2[32] = 1; validG2[64] = 1; validG2[96] = 1;
+    const validIc   = Array(5).fill(null).map(() => { const ic = Array(64).fill(0); ic[0] = 1; ic[32] = 1; return ic; });
+
+    try {
+      await program.methods
+        .storeVk(validG1, badG2, validG2, validG2, validIc)
+        .accounts({ admin: admin.publicKey, programConfig: programConfigPda, vkAccount: vkPda, systemProgram: anchor.web3.SystemProgram.programId })
+        .rpc();
+      assert.fail("Should have thrown");
+    } catch (err) {
+      assert.include(err.message, "InvalidVerificationKey");
+    }
+  });
+
   it("Stores the verifying key", async () => {
     // store_vk is a one-time init — placed here so earlier cast_vote tests
     // can still use the dev bypass (VK absent → proof verification skipped).
-    const zeroG1 = Array(64).fill(0);
-    const zeroG2 = Array(128).fill(0);
-    const zeroIc = Array(5).fill(null).map(() => Array(64).fill(0));
+    // Values are non-zero and in-range (first byte of each 32-byte coordinate
+    // chunk = 1 < 0x30), satisfying the field-element range check.
+    // These are NOT valid curve points; real deployments must use a proper
+    // trusted-setup ceremony to produce genuine BN254 curve points.
+    const testG1 = Array(64).fill(0); testG1[0] = 1; testG1[32] = 1;
+    const testG2 = Array(128).fill(0); testG2[0] = 1; testG2[32] = 1; testG2[64] = 1; testG2[96] = 1;
+    const testIc = Array(5).fill(null).map(() => { const ic = Array(64).fill(0); ic[0] = 1; ic[32] = 1; return ic; });
 
     await program.methods
-      .storeVk(zeroG1, zeroG2, zeroG2, zeroG2, zeroIc)
+      .storeVk(testG1, testG2, testG2, testG2, testIc)
       .accounts({
         admin: admin.publicKey,
         programConfig: programConfigPda,
@@ -962,16 +1002,16 @@ describe("solana_ballot", () => {
 
   it("Rejects a second store_vk call (reinitialization guard)", async () => {
     // vkPda is already initialized from "Stores the verifying key".
-    // A second call must be rejected by the is_initialized guard in the
-    // handler, even though init_if_needed would otherwise succeed at the
-    // account-constraint level.
-    const zeroG1 = Array(64).fill(0);
-    const zeroG2 = Array(128).fill(0);
-    const zeroIc = Array(5).fill(null).map(() => Array(64).fill(0));
+    // A second call must be rejected by the is_initialized guard before
+    // reaching validation, even though init_if_needed would otherwise
+    // succeed at the account-constraint level.
+    const testG1 = Array(64).fill(0); testG1[0] = 1; testG1[32] = 1;
+    const testG2 = Array(128).fill(0); testG2[0] = 1; testG2[32] = 1; testG2[64] = 1; testG2[96] = 1;
+    const testIc = Array(5).fill(null).map(() => { const ic = Array(64).fill(0); ic[0] = 1; ic[32] = 1; return ic; });
 
     try {
       await program.methods
-        .storeVk(zeroG1, zeroG2, zeroG2, zeroG2, zeroIc)
+        .storeVk(testG1, testG2, testG2, testG2, testIc)
         .accounts({
           admin: admin.publicKey,
           programConfig: programConfigPda,

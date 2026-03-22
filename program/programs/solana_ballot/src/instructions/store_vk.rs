@@ -31,7 +31,24 @@ pub fn handler(
     // This replaces the guarantee previously provided by `init` alone.
     require!(!vk_account.is_initialized, BallotError::VkAlreadyInitialized);
 
-    vk_account.admin = ctx.accounts.admin.key();
+    // Validate that every curve-point component is non-identity and has
+    // coordinates that are valid BN254 field elements (< BN254_PRIME).
+    // All-zero inputs are the identity point; out-of-range coordinates are
+    // never on the curve. Either would cause every cast_vote to fail with
+    // InvalidProof, permanently bricking all future elections.
+    //
+    // Note: this validates field-element range, not full curve membership.
+    // Full membership requires solving the curve equation and is deferred to
+    // the ZK trusted-setup ceremony. Operators must use a proper MPC ceremony
+    // for production deployments.
+    require!(validate_g1(&vk_alpha_g1), BallotError::InvalidVerificationKey);
+    require!(validate_g2(&vk_beta_g2),  BallotError::InvalidVerificationKey);
+    require!(validate_g2(&vk_gamma_g2), BallotError::InvalidVerificationKey);
+    require!(validate_g2(&vk_delta_g2), BallotError::InvalidVerificationKey);
+    for ic_elem in &vk_ic {
+        require!(validate_g1(ic_elem), BallotError::InvalidVerificationKey);
+    }
+
     vk_account.vk_alpha_g1 = vk_alpha_g1;
     vk_account.vk_beta_g2 = vk_beta_g2;
     vk_account.vk_gamma_g2 = vk_gamma_g2;
@@ -42,6 +59,28 @@ pub fn handler(
 
     msg!("Verification key stored. ZK proof verification is now active.");
     Ok(())
+}
+
+/// Returns true if `point` is a non-identity G1 element with both coordinates
+/// strictly less than BN254_PRIME (big-endian lexicographic comparison).
+fn validate_g1(point: &[u8; PROOF_A_SIZE]) -> bool {
+    let x: [u8; 32] = point[..32].try_into().unwrap();
+    let y: [u8; 32] = point[32..].try_into().unwrap();
+    // Reject the identity (0, 0) and out-of-range coordinates.
+    (x != [0u8; 32] || y != [0u8; 32]) && x < BN254_PRIME && y < BN254_PRIME
+}
+
+/// Returns true if `point` is a non-identity G2 element with all four Fp2
+/// coordinate chunks strictly less than BN254_PRIME.
+fn validate_g2(point: &[u8; PROOF_B_SIZE]) -> bool {
+    let chunks: [[u8; 32]; 4] = [
+        point[..32].try_into().unwrap(),
+        point[32..64].try_into().unwrap(),
+        point[64..96].try_into().unwrap(),
+        point[96..].try_into().unwrap(),
+    ];
+    // Reject the identity (all chunks zero) and out-of-range coordinates.
+    chunks.iter().any(|c| c != &[0u8; 32]) && chunks.iter().all(|c| c < &BN254_PRIME)
 }
 
 #[derive(Accounts)]

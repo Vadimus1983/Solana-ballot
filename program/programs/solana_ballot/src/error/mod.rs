@@ -64,4 +64,7 @@ pub enum BallotError {
 
     #[msg("Commitment must be a non-zero BN254 field element (0 < commitment < p)")]
     InvalidCommitment,
+
+    #[msg("Verification key contains an invalid curve point or out-of-range field element")]
+    InvalidVerificationKey,
 }

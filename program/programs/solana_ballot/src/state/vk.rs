@@ -28,9 +28,6 @@ use crate::constants::*;
 /// trusted setup tooling.
 #[account]
 pub struct VerificationKeyAccount {
-    /// Admin who uploaded this VK — only they can replace it
-    pub admin: Pubkey,
-
     /// Whether the VK has been initialized with real data.
     /// If false, `cast_vote` logs a warning and skips verification
     /// (development mode only — must be true in production).
@@ -58,7 +55,6 @@ pub struct VerificationKeyAccount {
 
 impl VerificationKeyAccount {
     pub const LEN: usize = ANCHOR_DISCRIMINATOR
-        + PUBKEY_SIZE                                          // admin
         + 1                                                    // is_initialized
         + PROOF_A_SIZE                                         // vk_alpha_g1
         + PROOF_B_SIZE                                         // vk_beta_g2

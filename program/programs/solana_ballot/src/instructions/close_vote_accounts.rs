@@ -7,11 +7,28 @@ use crate::constants::*;
 /// Closes one NullifierRecord + VoteRecord pair for a finalized proposal,
 /// returning the rent-exempt lamports to `closer`.
 ///
-/// Permissionless: any account may call this once finalization is complete.
-/// The Anchor `close` constraint zeroes the account data and sets the closed
-/// discriminator, preventing resurrection attacks.
+/// # Permissionless design (intentional)
+///
+/// Any account may call this instruction and designate itself as `closer`,
+/// receiving the rent that the original voter paid during `cast_vote`.
+/// This is a deliberate liveness trade-off: if voters disappear after the
+/// election, unclosed accounts would be stranded forever. Making cleanup
+/// permissionless ensures the program can always reach a clean state.
+///
+/// # Economic trade-off
+///
+/// Voters pay rent when casting a vote but are not guaranteed to recover it —
+/// a third party (e.g. a MEV bot) can front-run the close and claim the rent.
+/// This is accepted because:
+///   1. ZK anonymity prevents storing the original voter's address on-chain,
+///      so there is no privacy-preserving way to enforce voter-only reclaim.
+///   2. The rent amounts (~1,400 lamports per pair) are small relative to
+///      transaction fees at current network conditions.
+///
+/// The Anchor `close` constraint zeroes account data and sets the closed
+/// discriminator, preventing resurrection attacks regardless of who calls.
 pub fn handler(ctx: Context<CloseVoteAccounts>) -> Result<()> {
-    ctx.accounts.proposal.closed_vote_count += 1;
+    ctx.accounts.proposal.closed_vote_count = ctx.accounts.proposal.closed_vote_count.saturating_add(1);
     Ok(())
 }
 
