@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+#[cfg(not(feature = "dev"))]
 use groth16_solana::groth16::{Groth16Verifier, Groth16Verifyingkey};
 use crate::state::proposal::{Proposal, ProposalStatus};
 use crate::state::vote::{VoteRecord, NullifierRecord};
@@ -11,6 +12,10 @@ use crate::constants::*;
 /// Marked `#[inline(never)]` to ensure the compiler allocates a separate stack
 /// frame for this function. The Groth16Verifyingkey and public_inputs together
 /// would push cast_vote's frame over Solana's 4096-byte BPF stack limit.
+///
+/// Only called in production builds; gated with `#[cfg(not(feature = "dev"))]`
+/// at the call site to suppress dead-code warnings in dev.
+#[cfg(not(feature = "dev"))]
 #[inline(never)]
 fn verify_groth16(
     proof_a: &[u8; PROOF_A_SIZE],
@@ -77,23 +82,32 @@ pub fn handler(
         .try_into()
         .map_err(|_| error!(BallotError::InvalidProof))?;
 
-    // ── Parse optional VK ─────────────────────────────────────────────────────
+    // nullifier must be a non-zero BN254 field element.
     //
-    // The VK account is an UncheckedAccount so cast_vote works even before
-    // `store_vk` has been called (development mode).
+    // In production the Groth16 verifier enforces this implicitly, but
+    // explicit validation provides defence-in-depth: a zero or out-of-range
+    // nullifier accepted in dev mode (or if the VK check ever regressed)
+    // would produce an unreachable NullifierRecord tied to an invalid ZK state.
+    require!(
+        nullifier != [0u8; HASH_SIZE] && nullifier < BN254_PRIME,
+        BallotError::InvalidProof
+    );
+
+    // vote_commitment must be a non-zero BN254 field element.
     //
-    // Attempt to deserialize: succeeds only if the account has been initialized
-    // with the correct Anchor discriminator. If the account is absent, empty, or
-    // has the wrong discriminator, `vk_opt` is None and verification is skipped.
-    let vk_opt: Option<VerificationKeyAccount> = {
-        let data = ctx.accounts.vk_account.try_borrow_data()?;
-        if data.len() >= VerificationKeyAccount::LEN {
-            let mut slice: &[u8] = &data;
-            VerificationKeyAccount::try_deserialize(&mut slice).ok()
-        } else {
-            None
-        }
-    };
+    // Poseidon always outputs a non-zero field element strictly less than
+    // BN254_PRIME. An all-zero commitment can never be the output of
+    // Poseidon(vote, randomness), so reveal_vote would always fail with
+    // CommitmentMismatch — permanently stranding the vote: vote_count is
+    // incremented but yes_count + no_count can never reach it, delaying
+    // finalization until the 24-hour grace period expires.
+    //
+    // Out-of-range commitments (≥ BN254_PRIME) are equally unrevealable
+    // because the ZK circuit operates in the BN254 scalar field.
+    require!(
+        vote_commitment != [0u8; HASH_SIZE] && vote_commitment < BN254_PRIME,
+        BallotError::InvalidCommitment
+    );
 
     let proposal = &mut ctx.accounts.proposal;
     let clock = Clock::get()?;
@@ -106,8 +120,12 @@ pub fn handler(
         clock.unix_timestamp >= proposal.voting_start,
         BallotError::VotingNotOpen
     );
+    // Strict less-than keeps the boundary consistent with open_voting
+    // (!voting_has_ended = now < voting_end) and close_voting (now >= voting_end).
+    // Using <= would allow a vote and a close in the same slot at now == voting_end,
+    // letting transaction ordering within a slot silently drop a valid vote.
     require!(
-        clock.unix_timestamp <= proposal.voting_end,
+        clock.unix_timestamp < proposal.voting_end,
         BallotError::VotingNotOpen
     );
 
@@ -124,33 +142,29 @@ pub fn handler(
     // merkle_root is read from the proposal account, not supplied by the client.
     // A proof generated against a stale root will correctly fail verification.
     //
-    // If the VK account was absent or uninitialized, `vk_opt` is None and
-    // verification is skipped — development mode only.
+    // `is_initialized` is enforced unconditionally by the account constraint on
+    // `vk_account`. In dev mode only the Groth16 math is skipped.
 
     let proposal_id = proposal.id;       // capture before mutable borrow below
     let merkle_root = proposal.merkle_root;
 
-    match vk_opt.as_ref().filter(|vk| vk.is_initialized) {
-        Some(vk) => {
-            // Verification in a separate #[inline(never)] frame to stay within
-            // Solana's 4096-byte BPF stack limit.
-            verify_groth16(
-                proof_a, proof_b, proof_c,
-                &nullifier, &proposal_id, &merkle_root, &vote_commitment,
-                vk,
-            )?;
-        }
-        None => {
-            // In production builds (compiled without the `dev` feature) the absence
-            // of an initialised VK is a hard error — votes cannot be cast without
-            // a valid verifying key.  The `dev` feature enables the bypass so that
-            // `anchor test` works without a real Groth16 trusted-setup ceremony.
-            #[cfg(feature = "dev")]
-            msg!("WARNING: VK not initialized — proof verification skipped (dev feature flag). \
-                  Build with --no-default-features for production.");
-            #[cfg(not(feature = "dev"))]
-            return err!(BallotError::VkNotInitialized);
-        }
+    // Groth16 math: runs in production; skipped in dev (proof bypass).
+    #[cfg(not(feature = "dev"))]
+    {
+        // Verification in a separate #[inline(never)] frame to stay within
+        // Solana's 4096-byte BPF stack limit.
+        verify_groth16(
+            proof_a, proof_b, proof_c,
+            &nullifier, &proposal_id, &merkle_root, &vote_commitment,
+            &ctx.accounts.vk_account,
+        )?;
+    }
+    #[cfg(feature = "dev")]
+    {
+        // Silence unused-variable warnings for names only live in the prod block.
+        let _ = (proof_a, proof_b, proof_c, proposal_id, merkle_root);
+        msg!("WARNING: Groth16 verification skipped (dev feature flag). \
+              Build without --features dev for production.");
     }
 
     let nullifier_record = &mut ctx.accounts.nullifier_record;
@@ -191,12 +205,16 @@ pub struct CastVote<'info> {
     )]
     pub proposal: Account<'info, Proposal>,
 
-    /// CHECK: Groth16 VK PDA. The PDA derivation is validated by the seeds
-    /// constraint. The account data is parsed manually in the handler:
-    ///   - If initialized (`store_vk` has been called): real Groth16 verification runs.
-    ///   - If absent or uninitialized: verification is skipped (development mode).
-    #[account(seeds = [SEED_VK], bump)]
-    pub vk_account: UncheckedAccount<'info>,
+    /// Groth16 VK PDA. Using a typed account with the stored bump avoids
+    /// `find_program_address` re-derivation and is consistent with every other
+    /// PDA in the program. The `is_initialized` constraint enforces that
+    /// `store_vk` was called before any vote is accepted, in both dev and prod.
+    #[account(
+        seeds = [SEED_VK],
+        bump = vk_account.bump,
+        constraint = vk_account.is_initialized @ BallotError::VkNotInitialized,
+    )]
+    pub vk_account: Account<'info, VerificationKeyAccount>,
 
     // Nullifier account — creating it proves nullifier is fresh.
     // If it already exists, init will fail → prevents double voting.

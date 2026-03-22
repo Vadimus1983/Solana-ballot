@@ -19,10 +19,10 @@ pub fn handler(
     require!(title.len() <= MAX_TITLE_LEN, BallotError::TitleTooLong);
     require!(description.len() <= MAX_DESCRIPTION_LEN, BallotError::DescriptionTooLong);
     require!(voting_end > voting_start, BallotError::InvalidVotingPeriod);
-    require!(
-        voting_end - voting_start <= MAX_VOTING_DURATION,
-        BallotError::InvalidVotingPeriod
-    );
+    let duration = voting_end
+        .checked_sub(voting_start)
+        .ok_or(error!(BallotError::InvalidVotingPeriod))?;
+    require!(duration <= MAX_VOTING_DURATION, BallotError::InvalidVotingPeriod);
 
     let clock = Clock::get()?;
 
@@ -52,11 +52,12 @@ pub fn handler(
     proposal.status        = ProposalStatus::Registration;
     proposal.merkle_root   = [0u8; HASH_SIZE];
     proposal.merkle_frontier = [[0u8; HASH_SIZE]; MERKLE_DEPTH];
-    proposal.voter_count   = 0;
-    proposal.vote_count    = 0;
-    proposal.yes_count     = 0;
-    proposal.no_count      = 0;
-    proposal.bump          = ctx.bumps.proposal;
+    proposal.voter_count       = 0;
+    proposal.vote_count        = 0;
+    proposal.yes_count         = 0;
+    proposal.no_count          = 0;
+    proposal.closed_vote_count = 0;
+    proposal.bump              = ctx.bumps.proposal;
 
     msg!("Proposal created: {:?}", proposal.title);
     Ok(())

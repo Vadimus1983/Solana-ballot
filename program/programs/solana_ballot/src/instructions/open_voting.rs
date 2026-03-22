@@ -2,7 +2,6 @@ use anchor_lang::prelude::*;
 use crate::state::proposal::{Proposal, ProposalStatus};
 use crate::error::BallotError;
 use crate::constants::{SEED_PROPOSAL, SEED_VK};
-#[cfg(not(feature = "dev"))]
 use crate::state::VerificationKeyAccount;
 
 /// Transitions the proposal from Registration → Voting.
@@ -30,23 +29,12 @@ pub fn handler(ctx: Context<OpenVoting>) -> Result<()> {
     // Require the verifying key to be on-chain and initialized before the
     // election transitions to Voting. Without a VK every cast_vote fails with
     // VkNotInitialized, permanently bricking the election since store_vk uses
-    // `init` (one-time) and the proposal cannot revert to Registration.
+    // `init_if_needed` + is_initialized guard and the proposal cannot revert.
     //
     // In dev builds the check is skipped so `anchor test` works without a real
-    // Groth16 trusted-setup ceremony (matches the bypass in cast_vote.rs).
+    // Groth16 trusted-setup ceremony.
     #[cfg(not(feature = "dev"))]
-    {
-        let data = ctx.accounts.vk_account.try_borrow_data()?;
-        let vk_ok = if data.len() >= VerificationKeyAccount::LEN {
-            let mut slice: &[u8] = &data;
-            VerificationKeyAccount::try_deserialize(&mut slice)
-                .map(|vk| vk.is_initialized)
-                .unwrap_or(false)
-        } else {
-            false
-        };
-        require!(vk_ok, BallotError::VkNotInitialized);
-    }
+    require!(ctx.accounts.vk_account.is_initialized, BallotError::VkNotInitialized);
 
     let proposal = &mut ctx.accounts.proposal;
     let clock = Clock::get()?;
@@ -96,10 +84,10 @@ pub struct OpenVoting<'info> {
     )]
     pub proposal: Account<'info, Proposal>,
 
-    /// CHECK: Groth16 VK PDA — seeds validated. The handler manually checks
-    /// that the account is initialized before allowing the transition to Voting
-    /// in production builds. In dev builds the check is skipped for
-    /// `anchor test` compatibility (mirrors the pattern in cast_vote.rs).
-    #[account(seeds = [SEED_VK], bump)]
-    pub vk_account: UncheckedAccount<'info>,
+    /// Groth16 VK PDA. Using a typed account with the stored bump avoids
+    /// the `find_program_address` call that dynamic bump re-derivation requires,
+    /// and is consistent with every other PDA in the program.
+    /// In production the handler checks `is_initialized`; dev builds skip it.
+    #[account(seeds = [SEED_VK], bump = vk_account.bump)]
+    pub vk_account: Account<'info, VerificationKeyAccount>,
 }

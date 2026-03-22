@@ -94,3 +94,30 @@ pub const ZERO_LEAF_DOMAIN_SEP: [u8; 32] = [
 /// to close the front-running window between program deployment and initialization.
 pub const PROGRAM_AUTHORITY: [u8; 32] = [0u8; 32];
 
+/// Compile-time guard: production builds with an all-zeros PROGRAM_AUTHORITY
+/// fail to compile with a clear error message.
+///
+/// This is strictly stronger than the previous `build.rs` string-match guard,
+/// which could be silently bypassed by comment variations, type-suffix changes
+/// (`[0; 32]` vs `[0u8; 32]`), or trailing whitespace.
+///
+/// Gated on `#[cfg(not(feature = "dev"))]` so local development and tests
+/// (which always pass `--features dev`) are unaffected.
+#[cfg(not(feature = "dev"))]
+const _PROGRAM_AUTHORITY_CHECK: () = {
+    let mut all_zero = true;
+    let mut i = 0usize;
+    while i < 32 {
+        if PROGRAM_AUTHORITY[i] != 0 {
+            all_zero = false;
+            break;
+        }
+        i += 1;
+    }
+    assert!(
+        !all_zero,
+        "PRODUCTION BUILD BLOCKED: PROGRAM_AUTHORITY is all-zeros. \
+         Set it to your deployment wallet's 32-byte public key before building for production."
+    );
+};
+

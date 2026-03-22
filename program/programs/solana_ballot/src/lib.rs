@@ -124,7 +124,11 @@ pub mod solana_ballot {
 
     /// Closes the voting period. No more votes can be cast after this.
     /// Transitions the proposal from Voting → Closed.
-    /// Can only be called by the admin.
+    ///
+    /// Permissionless — callable by any account once `voting_end` has passed.
+    /// This prevents the admin from blocking finalization by disappearing after
+    /// the election period ends. The time-lock (`voting_has_ended`) ensures the
+    /// window cannot be closed early.
     pub fn close_voting(ctx: Context<CloseVoting>) -> Result<()> {
         instructions::close_voting::handler(ctx)
     }

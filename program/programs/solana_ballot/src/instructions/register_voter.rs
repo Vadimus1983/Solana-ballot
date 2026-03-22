@@ -45,7 +45,7 @@ pub fn handler(ctx: Context<RegisterVoter>, commitment: [u8; HASH_SIZE]) -> Resu
     emit!(VoterRegistered {
         proposal_id: proposal.id,
         commitment,
-        leaf_index: proposal.voter_count - 1,
+        leaf_index,  // captured before saturating_add, not recomputed after
     });
 
     msg!("Voter registered. Total voters: {}", proposal.voter_count);

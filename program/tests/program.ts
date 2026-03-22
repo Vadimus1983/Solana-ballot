@@ -46,7 +46,7 @@ describe("solana_ballot", () => {
   const commitment = Buffer.alloc(32, 1);
 
   // Mock nullifier: Poseidon(secret_key, proposal_id) — mocked for Phase 2 testing
-  const nullifier = Buffer.alloc(32, 0xab);
+  const nullifier = Buffer.alloc(32, 0x01); // valid BN254 field element (first byte < 0x30)
 
   // Reveal randomness — kept fixed so the commitment is deterministic in tests.
   const revealRandomness = Buffer.alloc(32, 0);
@@ -165,6 +165,75 @@ describe("solana_ballot", () => {
 
   });
 
+  // ── VK setup — must happen before any cast_vote call ─────────────────────
+  //
+  // store_vk is placed here so all subsequent cast_vote calls can pass the
+  // unconditional VK guard added by the C-2 fix.  In dev builds the Groth16
+  // math is still skipped, but the VK account must be present and initialized.
+  //
+  // The two rejection tests must precede the successful store_vk because
+  // init_if_needed + is_initialized makes the key immutable after the first
+  // successful write.
+
+  it("Rejects store_vk with identity G1 point (all zeros)", async () => {
+    // All-zero G1 point is the group identity — not a valid VK component.
+    const identityG1 = Array(64).fill(0);  // (0,0) = identity
+    const validG2    = Array(128).fill(0); validG2[0] = 1; validG2[32] = 1; validG2[64] = 1; validG2[96] = 1;
+    const validIc    = Array(5).fill(null).map(() => { const ic = Array(64).fill(0); ic[0] = 1; ic[32] = 1; return ic; });
+
+    try {
+      await program.methods
+        .storeVk(identityG1, validG2, validG2, validG2, validIc)
+        .accounts({ admin: admin.publicKey, programConfig: programConfigPda, vkAccount: vkPda, systemProgram: anchor.web3.SystemProgram.programId })
+        .rpc();
+      assert.fail("Should have thrown");
+    } catch (err) {
+      assert.include(err.message, "InvalidVerificationKey");
+    }
+  });
+
+  it("Rejects store_vk with out-of-range G2 coordinate", async () => {
+    // A G2 component whose first coordinate chunk has first byte 0xff > 0x30
+    // (BN254 prime's first byte) is not a valid field element.
+    const validG1   = Array(64).fill(0); validG1[0] = 1; validG1[32] = 1;
+    const badG2     = Array(128).fill(0xff); // all bytes 0xff >> BN254 prime
+    const validG2   = Array(128).fill(0); validG2[0] = 1; validG2[32] = 1; validG2[64] = 1; validG2[96] = 1;
+    const validIc   = Array(5).fill(null).map(() => { const ic = Array(64).fill(0); ic[0] = 1; ic[32] = 1; return ic; });
+
+    try {
+      await program.methods
+        .storeVk(validG1, badG2, validG2, validG2, validIc)
+        .accounts({ admin: admin.publicKey, programConfig: programConfigPda, vkAccount: vkPda, systemProgram: anchor.web3.SystemProgram.programId })
+        .rpc();
+      assert.fail("Should have thrown");
+    } catch (err) {
+      assert.include(err.message, "InvalidVerificationKey");
+    }
+  });
+
+  it("Stores the verifying key", async () => {
+    // Values are non-zero and in-range (first byte of each 32-byte coordinate
+    // chunk = 1 < 0x30), satisfying the field-element range check.
+    // These are NOT valid curve points; real deployments must use a proper
+    // trusted-setup ceremony to produce genuine BN254 curve points.
+    const testG1 = Array(64).fill(0); testG1[0] = 1; testG1[32] = 1;
+    const testG2 = Array(128).fill(0); testG2[0] = 1; testG2[32] = 1; testG2[64] = 1; testG2[96] = 1;
+    const testIc = Array(5).fill(null).map(() => { const ic = Array(64).fill(0); ic[0] = 1; ic[32] = 1; return ic; });
+
+    await program.methods
+      .storeVk(testG1, testG2, testG2, testG2, testIc)
+      .accounts({
+        admin: admin.publicKey,
+        programConfig: programConfigPda,
+        vkAccount: vkPda,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const vk = await program.account.verificationKeyAccount.fetch(vkPda);
+    assert.equal(vk.isInitialized, true);
+  });
+
   it("Opens voting", async () => {
     await program.methods
       .openVoting()
@@ -183,8 +252,8 @@ describe("solana_ballot", () => {
     nullifierRecordPda = getNullifierPda(proposalPda, nullifier);
     voteRecordPda = getVoteRecordPda(proposalPda, nullifier);
 
-    // VK account is not initialized → cast_vote skips proof verification (dev mode).
-    // In production: call store_vk first, then cast_vote performs real Groth16 verification.
+    // VK is initialized above. In dev mode the Groth16 math is skipped but
+    // the VK must be present — the unconditional VK guard enforces this.
     await program.methods
       .castVote(
         proof,           // Vec<u8>: proof_a (64) || proof_b (128) || proof_c (64)
@@ -539,6 +608,83 @@ describe("solana_ballot", () => {
     }
   });
 
+  it("Rejects cast_vote with zero vote_commitment", async () => {
+    // An all-zero commitment can never be a Poseidon output, so the vote
+    // would be permanently unrevealable — griefing finalization by preventing
+    // all_votes_revealed from ever becoming true.
+    const zvTitle = "Zero commitment cast_vote test";
+    const zvPda = getProposalPda(admin.publicKey, zvTitle);
+    const zvNullifier = Buffer.alloc(32, 0x07); // valid BN254 field element
+    const zvNullifierPda = getNullifierPda(zvPda, zvNullifier);
+    const zvVoteRecordPda = getVoteRecordPda(zvPda, zvNullifier);
+    const futureEnd = Math.floor(Date.now() / 1000) + 3600;
+
+    await program.methods
+      .createProposal(zvTitle, description, new anchor.BN(votingStart), new anchor.BN(futureEnd))
+      .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: zvPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    await program.methods.registerVoter([...Buffer.alloc(32, 0x0b)])
+      .accounts({ admin: admin.publicKey, proposal: zvPda, commitmentRecord: getCommitmentRecordPda(zvPda, Buffer.alloc(32, 0x0b)), systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    await program.methods.openVoting()
+      .accounts({ admin: admin.publicKey, proposal: zvPda, vkAccount: vkPda })
+      .rpc();
+
+    try {
+      await program.methods
+        .castVote(proof, [...zvNullifier], [...Buffer.alloc(32, 0)])  // zero commitment
+        .accounts({
+          voter: admin.publicKey, proposal: zvPda, vkAccount: vkPda,
+          nullifierRecord: zvNullifierPda, voteRecord: zvVoteRecordPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .rpc();
+      assert.fail("Should have thrown");
+    } catch (err) {
+      assert.include(err.message, "InvalidCommitment");
+    }
+  });
+
+  it("Rejects cast_vote with zero nullifier", async () => {
+    // Zero is not a valid Poseidon output; accepting it would let an attacker
+    // occupy a NullifierRecord with an invalid ZK state in dev mode.
+    const znTitle = "Zero nullifier cast_vote test";
+    const znPda = getProposalPda(admin.publicKey, znTitle);
+    const zeroNullifier = Buffer.alloc(32, 0);
+    const znNullifierPda = getNullifierPda(znPda, zeroNullifier);
+    const znVoteRecordPda = getVoteRecordPda(znPda, zeroNullifier);
+    const futureEnd = Math.floor(Date.now() / 1000) + 3600;
+
+    await program.methods
+      .createProposal(znTitle, description, new anchor.BN(votingStart), new anchor.BN(futureEnd))
+      .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: znPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    await program.methods.registerVoter([...Buffer.alloc(32, 0x0c)])
+      .accounts({ admin: admin.publicKey, proposal: znPda, commitmentRecord: getCommitmentRecordPda(znPda, Buffer.alloc(32, 0x0c)), systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    await program.methods.openVoting()
+      .accounts({ admin: admin.publicKey, proposal: znPda, vkAccount: vkPda })
+      .rpc();
+
+    try {
+      await program.methods
+        .castVote(proof, [...zeroNullifier], [...voteCommitment])
+        .accounts({
+          voter: admin.publicKey, proposal: znPda, vkAccount: vkPda,
+          nullifierRecord: znNullifierPda, voteRecord: znVoteRecordPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .rpc();
+      assert.fail("Should have thrown");
+    } catch (err) {
+      assert.include(err.message, "InvalidProof");
+    }
+  });
+
   it("Rejects close_voting before voting_end", async () => {
     const earlyCloseTitle = "Early close test";
     const earlyClosePda = getProposalPda(admin.publicKey, earlyCloseTitle);
@@ -574,7 +720,7 @@ describe("solana_ballot", () => {
     const now2 = Math.floor(Date.now() / 1000);
     const cmTitle = "Commitment mismatch test";
     const cmPda = getProposalPda(admin.publicKey, cmTitle);
-    const cmNullifier = Buffer.alloc(32, 0xef);
+    const cmNullifier = Buffer.alloc(32, 0x02); // valid BN254 field element
     const cmNullifierPda = getNullifierPda(cmPda, cmNullifier);
     const cmVoteRecordPda = getVoteRecordPda(cmPda, cmNullifier);
     const cmRandomness = Buffer.alloc(32, 0x42);
@@ -630,7 +776,7 @@ describe("solana_ballot", () => {
     const now3 = Math.floor(Date.now() / 1000);
     const wvTitle = "Voter auth test";
     const wvPda = getProposalPda(admin.publicKey, wvTitle);
-    const wvNullifier = Buffer.alloc(32, 0xcc);
+    const wvNullifier = Buffer.alloc(32, 0x03); // valid BN254 field element
     const wvNullifierPda = getNullifierPda(wvPda, wvNullifier);
     const wvVoteRecordPda = getVoteRecordPda(wvPda, wvNullifier);
     const wvRandomness = Buffer.alloc(32, 0);
@@ -718,9 +864,6 @@ describe("solana_ballot", () => {
   // i64::MAX can never be closed.  The tests below instead confirm that the
   // conditions surrounding the saturating arithmetic evaluate correctly with
   // normal values.
-  //
-  // NOTE: placed before store_vk so cast_vote still uses the dev bypass
-  // (VK absent → proof verification skipped).
 
   it("Rejects finalize_tally when votes unrevealed and grace period not yet expired", async () => {
     // vote_count=1, yes+no=0 → all_revealed = false (tests saturating_add on counts).
@@ -730,7 +873,7 @@ describe("solana_ballot", () => {
     const now4 = Math.floor(Date.now() / 1000);
     const graceTitle = "Grace period test";
     const gracePda = getProposalPda(admin.publicKey, graceTitle);
-    const graceNullifier = Buffer.alloc(32, 0xdd);
+    const graceNullifier = Buffer.alloc(32, 0x04); // valid BN254 field element
     const graceNullifierPda = getNullifierPda(gracePda, graceNullifier);
     const graceVoteRecordPda = getVoteRecordPda(gracePda, graceNullifier);
     const graceCommitment = computeVoteCommitment(1, Buffer.alloc(32, 0));
@@ -779,13 +922,12 @@ describe("solana_ballot", () => {
     // Two votes cast → vote_count=2. Closing only the first pair leaves
     // closed_vote_count=1 < vote_count=2, so close_proposal must still reject.
     // Only after both pairs are closed does close_proposal succeed.
-    // NOTE: placed before store_vk so cast_vote uses the dev bypass (VK absent).
     const now = Math.floor(Date.now() / 1000);
     const partTitle = "Partial close test";
     const partPda   = getProposalPda(admin.publicKey, partTitle);
 
-    const nul1 = Buffer.alloc(32, 0xa1);
-    const nul2 = Buffer.alloc(32, 0xa2);
+    const nul1 = Buffer.alloc(32, 0x05); // valid BN254 field element
+    const nul2 = Buffer.alloc(32, 0x06); // valid BN254 field element
     const nulPda1  = getNullifierPda(partPda, nul1);
     const nulPda2  = getNullifierPda(partPda, nul2);
     const voteP1   = getVoteRecordPda(partPda, nul1);
@@ -866,18 +1008,12 @@ describe("solana_ballot", () => {
     }
   });
 
-  // ── open_voting VK gate tests ──────────────────────────────────────────────
+  // ── open_voting VK gate ────────────────────────────────────────────────────
   //
-  // These three tests cover open_voting requiring the vk_account PDA.
   // The seeds constraint is always enforced (wrong address → rejected before
   // the handler runs). The is_initialized check only fires in production
   // builds; dev builds allow opening without a VK so anchor test works
   // without a real trusted-setup ceremony.
-  //
-  // NOTE: store_vk uses `init_if_needed` + is_initialized guard, so it can
-  // only write data once per deployment. These tests are placed last so
-  // earlier cast_vote tests can rely on the dev bypass (VK absent →
-  // proof verification skipped).
 
   it("Rejects open_voting when vk_account PDA is wrong", async () => {
     // Anchor validates account seeds before the handler runs.
@@ -910,67 +1046,6 @@ describe("solana_ballot", () => {
     } catch (err) {
       assert.ok(err, "Wrong vk_account PDA should be rejected by seeds constraint");
     }
-  });
-
-  it("Rejects store_vk with identity G1 point (all zeros)", async () => {
-    // All-zero G1 point is the group identity — not a valid VK component.
-    const identityG1 = Array(64).fill(0);  // (0,0) = identity
-    const validG2    = Array(128).fill(0); validG2[0] = 1; validG2[32] = 1; validG2[64] = 1; validG2[96] = 1;
-    const validIc    = Array(5).fill(null).map(() => { const ic = Array(64).fill(0); ic[0] = 1; ic[32] = 1; return ic; });
-
-    try {
-      await program.methods
-        .storeVk(identityG1, validG2, validG2, validG2, validIc)
-        .accounts({ admin: admin.publicKey, programConfig: programConfigPda, vkAccount: vkPda, systemProgram: anchor.web3.SystemProgram.programId })
-        .rpc();
-      assert.fail("Should have thrown");
-    } catch (err) {
-      assert.include(err.message, "InvalidVerificationKey");
-    }
-  });
-
-  it("Rejects store_vk with out-of-range G2 coordinate", async () => {
-    // A G2 component whose first coordinate chunk has first byte 0xff > 0x30
-    // (BN254 prime's first byte) is not a valid field element.
-    const validG1   = Array(64).fill(0); validG1[0] = 1; validG1[32] = 1;
-    const badG2     = Array(128).fill(0xff); // all bytes 0xff >> BN254 prime
-    const validG2   = Array(128).fill(0); validG2[0] = 1; validG2[32] = 1; validG2[64] = 1; validG2[96] = 1;
-    const validIc   = Array(5).fill(null).map(() => { const ic = Array(64).fill(0); ic[0] = 1; ic[32] = 1; return ic; });
-
-    try {
-      await program.methods
-        .storeVk(validG1, badG2, validG2, validG2, validIc)
-        .accounts({ admin: admin.publicKey, programConfig: programConfigPda, vkAccount: vkPda, systemProgram: anchor.web3.SystemProgram.programId })
-        .rpc();
-      assert.fail("Should have thrown");
-    } catch (err) {
-      assert.include(err.message, "InvalidVerificationKey");
-    }
-  });
-
-  it("Stores the verifying key", async () => {
-    // store_vk is a one-time init — placed here so earlier cast_vote tests
-    // can still use the dev bypass (VK absent → proof verification skipped).
-    // Values are non-zero and in-range (first byte of each 32-byte coordinate
-    // chunk = 1 < 0x30), satisfying the field-element range check.
-    // These are NOT valid curve points; real deployments must use a proper
-    // trusted-setup ceremony to produce genuine BN254 curve points.
-    const testG1 = Array(64).fill(0); testG1[0] = 1; testG1[32] = 1;
-    const testG2 = Array(128).fill(0); testG2[0] = 1; testG2[32] = 1; testG2[64] = 1; testG2[96] = 1;
-    const testIc = Array(5).fill(null).map(() => { const ic = Array(64).fill(0); ic[0] = 1; ic[32] = 1; return ic; });
-
-    await program.methods
-      .storeVk(testG1, testG2, testG2, testG2, testIc)
-      .accounts({
-        admin: admin.publicKey,
-        programConfig: programConfigPda,
-        vkAccount: vkPda,
-        systemProgram: anchor.web3.SystemProgram.programId,
-      })
-      .rpc();
-
-    const vk = await program.account.verificationKeyAccount.fetch(vkPda);
-    assert.equal(vk.isInitialized, true);
   });
 
   it("open_voting succeeds with an initialized VK", async () => {
