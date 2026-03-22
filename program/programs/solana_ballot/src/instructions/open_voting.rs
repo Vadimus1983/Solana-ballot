@@ -2,6 +2,8 @@ use anchor_lang::prelude::*;
 use crate::state::proposal::{Proposal, ProposalStatus};
 use crate::error::BallotError;
 use crate::constants::{SEED_PROPOSAL, SEED_VK};
+#[cfg(not(feature = "dev"))]
+use crate::state::VerificationKeyAccount;
 
 /// Transitions the proposal from Registration → Voting.
 ///

@@ -9,10 +9,11 @@ crate-type = ["cdylib", "lib"]
 name = "solana_ballot"
 
 [features]
-# `dev` is a default feature that enables the proof-verification bypass for local testing.
-# For production deploy, always build with: anchor build --no-default-features
-# The build.rs script emits a visible warning reminding you of this on every dev build.
-default = ["dev"]
+# `dev` enables the proof-verification bypass for local testing.
+# It is NOT included in `default` — `anchor build` produces a production binary.
+# For local development / running tests, use: anchor build --features dev
+# The build.rs script emits a hard error if a non-dev build ships with PROGRAM_AUTHORITY = [0u8; 32].
+default = []
 dev = []                            # Enables proof-verification bypass when VK is absent
 cpi = ["no-entrypoint"]
 no-entrypoint = []
