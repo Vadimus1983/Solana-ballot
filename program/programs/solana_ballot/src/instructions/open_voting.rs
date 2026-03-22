@@ -57,11 +57,12 @@ pub fn handler(ctx: Context<OpenVoting>) -> Result<()> {
         BallotError::NotInRegistration
     );
 
-    // Prevent opening before the agreed start time.
-    // The upper bound (voting_end) is not checked here — cast_vote already
-    // enforces it, so opening late is harmless (no votes can be cast).
+    // Require the call to land within the voting window: voting_start <= now < voting_end.
+    // The upper bound prevents the admin from opening an already-expired window,
+    // which would produce a finalizable proposal with 0/0 votes as the official result.
     require!(
-        clock.unix_timestamp >= proposal.voting_start,
+        clock.unix_timestamp >= proposal.voting_start
+            && !proposal.voting_has_ended(clock.unix_timestamp),
         BallotError::VotingNotOpen
     );
 

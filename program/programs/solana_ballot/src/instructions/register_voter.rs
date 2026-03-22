@@ -13,6 +13,18 @@ pub fn handler(ctx: Context<RegisterVoter>, commitment: [u8; HASH_SIZE]) -> Resu
         BallotError::NotInRegistration
     );
 
+    // Reject zero and out-of-range commitments.
+    // - Zero wastes a Merkle leaf: no one can produce Poseidon(secret,randomness)=0
+    //   and the ZK circuit would reject the proof anyway.
+    // - Values >= BN254_PRIME are not valid field elements and would cause the
+    //   ZK circuit to reject any proof for that slot.
+    // Both checks use big-endian byte comparison (array PartialOrd is lexicographic,
+    // which equals numeric order for big-endian byte arrays).
+    require!(
+        commitment != [0u8; HASH_SIZE] && commitment < BN254_PRIME,
+        BallotError::InvalidCommitment
+    );
+
     // commitment_record is initialized via `init`. If the same commitment has
     // already been registered for this proposal, `init` fails because the PDA
     // already exists — preventing Merkle tree slot exhaustion via duplicates.
@@ -28,7 +40,7 @@ pub fn handler(ctx: Context<RegisterVoter>, commitment: [u8; HASH_SIZE]) -> Resu
         leaf_index,
     )?;
     proposal.merkle_root = new_root;
-    proposal.voter_count += 1;
+    proposal.voter_count = proposal.voter_count.saturating_add(1);
 
     emit!(VoterRegistered {
         proposal_id: proposal.id,

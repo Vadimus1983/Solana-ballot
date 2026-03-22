@@ -67,6 +67,27 @@ pub const VOTE_UNREVEALED: u8 = 0xFF;
 /// 30 days in seconds.
 pub const MAX_VOTING_DURATION: i64 = 30 * 24 * 60 * 60; // 2_592_000
 
+/// BN254 scalar field prime (big-endian, 32 bytes).
+/// Voter commitments must be strictly less than this value to be valid field elements.
+/// r = 21888242871839275222246405745257275088548364400416034343698204186575808495617
+pub const BN254_PRIME: [u8; 32] = [
+    0x30, 0x64, 0x4e, 0x72, 0xe1, 0x31, 0xa0, 0x29,
+    0xb8, 0x50, 0x45, 0xb6, 0x81, 0x81, 0x58, 0x5d,
+    0x28, 0x33, 0xe8, 0x48, 0x79, 0xb9, 0x70, 0x91,
+    0x42, 0xe0, 0xf8, 0x53, 0xd2, 0x69, 0x41, 0x6f,
+];
+
+/// Domain separator for the incremental Merkle tree's empty-leaf value (zeros[0]).
+/// Using a non-zero domain makes empty tree slots cryptographically distinct from
+/// any real voter commitment, following the Semaphore/Tornado Cash convention.
+/// Value: b"solana_ballot_empty" (19 bytes, right-aligned in a 32-byte field element).
+pub const ZERO_LEAF_DOMAIN_SEP: [u8; 32] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    b's', b'o', b'l', b'a', b'n', b'a', b'_', // "solana_"
+    b'b', b'a', b'l', b'l', b'o', b't', b'_', // "ballot_"
+    b'e', b'm', b'p', b't', b'y',              // "empty"
+];
+
 /// Expected program authority for initialize.
 /// All-zeros = no restriction (safe default for testing / local development).
 /// Set to your deployment wallet's 32-byte public key before production deploy

@@ -61,4 +61,7 @@ pub enum BallotError {
 
     #[msg("All vote accounts must be closed before the proposal can be closed")]
     VoteAccountsNotClosed,
+
+    #[msg("Commitment must be a non-zero BN254 field element (0 < commitment < p)")]
+    InvalidCommitment,
 }

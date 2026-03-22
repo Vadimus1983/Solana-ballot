@@ -168,7 +168,7 @@ pub fn handler(
     vote_record.vote = VOTE_UNREVEALED;
     vote_record.bump = ctx.bumps.vote_record;
 
-    proposal.vote_count += 1;
+    proposal.vote_count = proposal.vote_count.saturating_add(1);
 
     msg!("Vote cast. Total votes: {}", proposal.vote_count);
     Ok(())

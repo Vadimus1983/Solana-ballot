@@ -32,9 +32,9 @@ pub fn handler(ctx: Context<RevealVote>, vote: u8, randomness: [u8; HASH_SIZE]) 
     vote_record.vote = vote;
 
     if vote == 1 {
-        proposal.yes_count += 1;
+        proposal.yes_count = proposal.yes_count.saturating_add(1);
     } else {
-        proposal.no_count += 1;
+        proposal.no_count = proposal.no_count.saturating_add(1);
     }
 
     msg!("Vote revealed. Yes: {}, No: {}", proposal.yes_count, proposal.no_count);

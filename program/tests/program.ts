@@ -375,6 +375,50 @@ describe("solana_ballot", () => {
     }
   });
 
+  it("Rejects zero commitment in register_voter", async () => {
+    const zeroCommitTitle = "Zero commitment test";
+    const zeroCommitPda = getProposalPda(admin.publicKey, zeroCommitTitle);
+    const zeroCommit = Buffer.alloc(32, 0);
+    const futureEnd = Math.floor(Date.now() / 1000) + 3600;
+
+    await program.methods
+      .createProposal(zeroCommitTitle, description, new anchor.BN(votingStart), new anchor.BN(futureEnd))
+      .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: zeroCommitPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    try {
+      await program.methods.registerVoter([...zeroCommit])
+        .accounts({ admin: admin.publicKey, proposal: zeroCommitPda, commitmentRecord: getCommitmentRecordPda(zeroCommitPda, zeroCommit), systemProgram: anchor.web3.SystemProgram.programId })
+        .rpc();
+      assert.fail("Should have thrown");
+    } catch (err) {
+      assert.include(err.message, "InvalidCommitment");
+    }
+  });
+
+  it("Rejects out-of-range commitment in register_voter", async () => {
+    // A commitment with first byte 0xff is > BN254 prime (first byte 0x30),
+    // so it is not a valid field element and must be rejected.
+    const rangeTitle = "Out-of-range commitment test";
+    const rangePda = getProposalPda(admin.publicKey, rangeTitle);
+    const outOfRange = Buffer.alloc(32, 0xff);
+    const futureEnd = Math.floor(Date.now() / 1000) + 3600;
+
+    await program.methods
+      .createProposal(rangeTitle, description, new anchor.BN(votingStart), new anchor.BN(futureEnd))
+      .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: rangePda, systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    try {
+      await program.methods.registerVoter([...outOfRange])
+        .accounts({ admin: admin.publicKey, proposal: rangePda, commitmentRecord: getCommitmentRecordPda(rangePda, outOfRange), systemProgram: anchor.web3.SystemProgram.programId })
+        .rpc();
+      assert.fail("Should have thrown");
+    } catch (err) {
+      assert.include(err.message, "InvalidCommitment");
+    }
+  });
+
   it("Rejects duplicate voter commitment on the same proposal", async () => {
     // The same commitment bytes registered twice on the same proposal must be
     // rejected. The CommitmentRecord PDA (seeds: "commitment" + proposal + commitment)
@@ -438,6 +482,37 @@ describe("solana_ballot", () => {
       assert.fail("Should have thrown");
     } catch (err) {
       assert.include(err.message, "NotInRegistration");
+    }
+  });
+
+  it("Rejects open_voting after voting_end has passed", async () => {
+    // Admin calls open_voting after voting_end — must fail with VotingNotOpen.
+    // Without the upper-bound check the proposal would transition to Voting,
+    // cast_vote would be blocked (window expired), and the admin could finalize
+    // immediately with 0/0 votes as the official result.
+    const now = Math.floor(Date.now() / 1000);
+    const expiredTitle = "Expired window test";
+    const expiredPda = getProposalPda(admin.publicKey, expiredTitle);
+
+    await program.methods
+      .createProposal(expiredTitle, description, new anchor.BN(now - 1), new anchor.BN(now + 1))
+      .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: expiredPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    await program.methods.registerVoter([...Buffer.alloc(32, 0x0a)])
+      .accounts({ admin: admin.publicKey, proposal: expiredPda, commitmentRecord: getCommitmentRecordPda(expiredPda, Buffer.alloc(32, 0x0a)), systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    // Wait for voting_end to pass.
+    await new Promise(r => setTimeout(r, 2000));
+
+    try {
+      await program.methods.openVoting()
+        .accounts({ admin: admin.publicKey, proposal: expiredPda, vkAccount: vkPda })
+        .rpc();
+      assert.fail("Should have thrown");
+    } catch (err) {
+      assert.include(err.message, "VotingNotOpen");
     }
   });
 
@@ -700,6 +775,97 @@ describe("solana_ballot", () => {
     }
   });
 
+  it("Rejects close_proposal with partially closed vote accounts (2-vote scenario)", async () => {
+    // Two votes cast → vote_count=2. Closing only the first pair leaves
+    // closed_vote_count=1 < vote_count=2, so close_proposal must still reject.
+    // Only after both pairs are closed does close_proposal succeed.
+    // NOTE: placed before store_vk so cast_vote uses the dev bypass (VK absent).
+    const now = Math.floor(Date.now() / 1000);
+    const partTitle = "Partial close test";
+    const partPda   = getProposalPda(admin.publicKey, partTitle);
+
+    const nul1 = Buffer.alloc(32, 0xa1);
+    const nul2 = Buffer.alloc(32, 0xa2);
+    const nulPda1  = getNullifierPda(partPda, nul1);
+    const nulPda2  = getNullifierPda(partPda, nul2);
+    const voteP1   = getVoteRecordPda(partPda, nul1);
+    const voteP2   = getVoteRecordPda(partPda, nul2);
+    // Both votes use the same (vote=1, randomness=0) commitment — fine because
+    // vote records are separate accounts keyed by nullifier.
+    const partCommitment = computeVoteCommitment(1, Buffer.alloc(32, 0));
+    const partRandomness = Buffer.alloc(32, 0);
+
+    // ── Setup ──────────────────────────────────────────────────────────────
+    await program.methods
+      .createProposal(partTitle, description, new anchor.BN(now - 1), new anchor.BN(now + 2))
+      .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: partPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    // Two distinct registered commitments (first byte < 0x30 for valid BN254 field element)
+    for (const c of [Buffer.alloc(32, 0x05), Buffer.alloc(32, 0x06)]) {
+      await program.methods.registerVoter([...c])
+        .accounts({ admin: admin.publicKey, proposal: partPda, commitmentRecord: getCommitmentRecordPda(partPda, c), systemProgram: anchor.web3.SystemProgram.programId })
+        .rpc();
+    }
+
+    await program.methods.openVoting()
+      .accounts({ admin: admin.publicKey, proposal: partPda, vkAccount: vkPda })
+      .rpc();
+
+    for (const [nul, nulPda, vPda] of [[nul1, nulPda1, voteP1], [nul2, nulPda2, voteP2]] as const) {
+      await program.methods.castVote(proof, [...nul], [...partCommitment])
+        .accounts({ voter: admin.publicKey, proposal: partPda, vkAccount: vkPda, nullifierRecord: nulPda, voteRecord: vPda, systemProgram: anchor.web3.SystemProgram.programId })
+        .rpc();
+    }
+
+    await new Promise(r => setTimeout(r, 3000));
+    await program.methods.closeVoting().accounts({ closer: admin.publicKey, proposal: partPda }).rpc();
+
+    // Reveal both votes so all_revealed=true and finalizeTally succeeds without
+    // waiting for the 86400-second grace period.
+    for (const vPda of [voteP1, voteP2]) {
+      await program.methods.revealVote(1, [...partRandomness])
+        .accounts({ revealer: admin.publicKey, proposal: partPda, voteRecord: vPda })
+        .rpc();
+    }
+
+    await program.methods.finalizeTally().accounts({ finalizer: admin.publicKey, proposal: partPda }).rpc();
+
+    // ── Close first pair ───────────────────────────────────────────────────
+    await program.methods.closeVoteAccounts()
+      .accounts({ closer: admin.publicKey, proposal: partPda, nullifierRecord: nulPda1, voteRecord: voteP1 })
+      .rpc();
+
+    let part = await program.account.proposal.fetch(partPda);
+    assert.equal(part.closedVoteCount.toNumber(), 1, "closed_vote_count should be 1 after first pair");
+
+    // close_proposal with 1 of 2 pairs closed → must still reject
+    try {
+      await program.methods.closeProposal().accounts({ admin: admin.publicKey, proposal: partPda }).rpc();
+      assert.fail("Should have thrown");
+    } catch (err) {
+      assert.include(err.message, "VoteAccountsNotClosed");
+    }
+
+    // ── Close second pair ──────────────────────────────────────────────────
+    await program.methods.closeVoteAccounts()
+      .accounts({ closer: admin.publicKey, proposal: partPda, nullifierRecord: nulPda2, voteRecord: voteP2 })
+      .rpc();
+
+    part = await program.account.proposal.fetch(partPda);
+    assert.equal(part.closedVoteCount.toNumber(), 2, "closed_vote_count should be 2 after second pair");
+
+    // All pairs closed → close_proposal must now succeed
+    await program.methods.closeProposal().accounts({ admin: admin.publicKey, proposal: partPda }).rpc();
+
+    try {
+      await program.account.proposal.fetch(partPda);
+      assert.fail("Should have thrown");
+    } catch (err) {
+      assert.ok(err, "Proposal account should be gone after close");
+    }
+  });
+
   // ── open_voting VK gate tests ──────────────────────────────────────────────
   //
   // These three tests cover open_voting requiring the vk_account PDA.
@@ -854,96 +1020,6 @@ describe("solana_ballot", () => {
       assert.fail("Should have thrown");
     } catch (err) {
       assert.include(err.message, "VoteAccountsNotClosed");
-    }
-  });
-
-  it("Rejects close_proposal with partially closed vote accounts (2-vote scenario)", async () => {
-    // Two votes cast → vote_count=2. Closing only the first pair leaves
-    // closed_vote_count=1 < vote_count=2, so close_proposal must still reject.
-    // Only after both pairs are closed does close_proposal succeed.
-    const now = Math.floor(Date.now() / 1000);
-    const partTitle = "Partial close test";
-    const partPda   = getProposalPda(admin.publicKey, partTitle);
-
-    const nul1 = Buffer.alloc(32, 0xa1);
-    const nul2 = Buffer.alloc(32, 0xa2);
-    const nulPda1  = getNullifierPda(partPda, nul1);
-    const nulPda2  = getNullifierPda(partPda, nul2);
-    const voteP1   = getVoteRecordPda(partPda, nul1);
-    const voteP2   = getVoteRecordPda(partPda, nul2);
-    // Both votes use the same (vote=1, randomness=0) commitment — fine because
-    // vote records are separate accounts keyed by nullifier.
-    const partCommitment = computeVoteCommitment(1, Buffer.alloc(32, 0));
-    const partRandomness = Buffer.alloc(32, 0);
-
-    // ── Setup ──────────────────────────────────────────────────────────────
-    await program.methods
-      .createProposal(partTitle, description, new anchor.BN(now - 1), new anchor.BN(now + 2))
-      .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: partPda, systemProgram: anchor.web3.SystemProgram.programId })
-      .rpc();
-
-    // Two distinct registered commitments (first byte < 0x30 for valid BN254 field element)
-    for (const c of [Buffer.alloc(32, 0x05), Buffer.alloc(32, 0x06)]) {
-      await program.methods.registerVoter([...c])
-        .accounts({ admin: admin.publicKey, proposal: partPda, commitmentRecord: getCommitmentRecordPda(partPda, c), systemProgram: anchor.web3.SystemProgram.programId })
-        .rpc();
-    }
-
-    await program.methods.openVoting()
-      .accounts({ admin: admin.publicKey, proposal: partPda, vkAccount: vkPda })
-      .rpc();
-
-    for (const [nul, nulPda, vPda] of [[nul1, nulPda1, voteP1], [nul2, nulPda2, voteP2]] as const) {
-      await program.methods.castVote(proof, [...nul], [...partCommitment])
-        .accounts({ voter: admin.publicKey, proposal: partPda, vkAccount: vkPda, nullifierRecord: nulPda, voteRecord: vPda, systemProgram: anchor.web3.SystemProgram.programId })
-        .rpc();
-    }
-
-    await new Promise(r => setTimeout(r, 3000));
-    await program.methods.closeVoting().accounts({ closer: admin.publicKey, proposal: partPda }).rpc();
-
-    // Reveal both votes so all_revealed=true and finalizeTally succeeds without
-    // waiting for the 86400-second grace period.
-    for (const vPda of [voteP1, voteP2]) {
-      await program.methods.revealVote(1, [...partRandomness])
-        .accounts({ revealer: admin.publicKey, proposal: partPda, voteRecord: vPda })
-        .rpc();
-    }
-
-    await program.methods.finalizeTally().accounts({ finalizer: admin.publicKey, proposal: partPda }).rpc();
-
-    // ── Close first pair ───────────────────────────────────────────────────
-    await program.methods.closeVoteAccounts()
-      .accounts({ closer: admin.publicKey, proposal: partPda, nullifierRecord: nulPda1, voteRecord: voteP1 })
-      .rpc();
-
-    let part = await program.account.proposal.fetch(partPda);
-    assert.equal(part.closedVoteCount.toNumber(), 1, "closed_vote_count should be 1 after first pair");
-
-    // close_proposal with 1 of 2 pairs closed → must still reject
-    try {
-      await program.methods.closeProposal().accounts({ admin: admin.publicKey, proposal: partPda }).rpc();
-      assert.fail("Should have thrown");
-    } catch (err) {
-      assert.include(err.message, "VoteAccountsNotClosed");
-    }
-
-    // ── Close second pair ──────────────────────────────────────────────────
-    await program.methods.closeVoteAccounts()
-      .accounts({ closer: admin.publicKey, proposal: partPda, nullifierRecord: nulPda2, voteRecord: voteP2 })
-      .rpc();
-
-    part = await program.account.proposal.fetch(partPda);
-    assert.equal(part.closedVoteCount.toNumber(), 2, "closed_vote_count should be 2 after second pair");
-
-    // All pairs closed → close_proposal must now succeed
-    await program.methods.closeProposal().accounts({ admin: admin.publicKey, proposal: partPda }).rpc();
-
-    try {
-      await program.account.proposal.fetch(partPda);
-      assert.fail("Should have thrown");
-    } catch (err) {
-      assert.ok(err, "Proposal account should be gone after close");
     }
   });
 

@@ -26,7 +26,7 @@
 /// - After DEPTH levels, `current` is the new Merkle root.
 use anchor_lang::prelude::*;
 
-use crate::constants::{HASH_SIZE, MERKLE_DEPTH};
+use crate::constants::{HASH_SIZE, MERKLE_DEPTH, ZERO_LEAF_DOMAIN_SEP};
 use crate::error::BallotError;
 
 /// Compute `Poseidon(left, right)` — BN254 x5, big-endian.
@@ -88,10 +88,12 @@ pub fn insert_leaf(
     leaf: [u8; HASH_SIZE],
     leaf_index: u64,
 ) -> Result<[u8; HASH_SIZE]> {
-    require!(
-        leaf_index < (1u64 << MERKLE_DEPTH),
-        BallotError::TreeFull
-    );
+    // checked_shl guards against a misconfigured MERKLE_DEPTH >= 64, which would
+    // silently overflow the plain shift and corrupt the capacity check.
+    let tree_capacity = 1u64
+        .checked_shl(MERKLE_DEPTH as u32)
+        .ok_or(error!(BallotError::TreeFull))?;
+    require!(leaf_index < tree_capacity, BallotError::TreeFull);
 
     let mut current = leaf;
     let mut index = leaf_index;
@@ -99,7 +101,12 @@ pub fn insert_leaf(
     // when a left-child node actually needs to pair with the zero subtree at that
     // level.  Right-child nodes pair with frontier[i] instead, so their zero hash
     // is never needed and those Poseidon calls are skipped entirely.
-    let mut zero = [0u8; HASH_SIZE];   // starts as zeros[0]
+    //
+    // zeros[0] = Poseidon([0u8;32], ZERO_LEAF_DOMAIN_SEP) — a domain-separated
+    // constant so empty tree slots are cryptographically distinct from any real
+    // voter commitment. Using [0u8;32] directly as zeros[0] would make an
+    // all-zero commitment indistinguishable from an unoccupied leaf.
+    let mut zero = poseidon2(&[0u8; HASH_SIZE], &ZERO_LEAF_DOMAIN_SEP)?; // zeros[0]
     let mut zero_level = 0usize;       // `zero` currently represents zeros[zero_level]
 
     for i in 0..MERKLE_DEPTH {
