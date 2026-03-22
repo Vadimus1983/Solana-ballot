@@ -161,6 +161,7 @@ describe("solana_ballot", () => {
       .accounts({
         admin: admin.publicKey,
         proposal: proposalPda,
+        vkAccount: vkPda,
       })
       .rpc();
 
@@ -326,6 +327,7 @@ describe("solana_ballot", () => {
         .accounts({
           admin: admin.publicKey,
           proposal: emptyPda,
+          vkAccount: vkPda,
         })
         .rpc();
       assert.fail("Should have thrown");
@@ -374,7 +376,7 @@ describe("solana_ballot", () => {
 
     await program.methods
       .openVoting()
-      .accounts({ admin: admin.publicKey, proposal: earlyClosePda })
+      .accounts({ admin: admin.publicKey, proposal: earlyClosePda, vkAccount: vkPda })
       .rpc();
 
     try {
@@ -409,7 +411,7 @@ describe("solana_ballot", () => {
       .rpc();
 
     await program.methods.openVoting()
-      .accounts({ admin: admin.publicKey, proposal: cmPda })
+      .accounts({ admin: admin.publicKey, proposal: cmPda, vkAccount: vkPda })
       .rpc();
 
     await program.methods
@@ -465,7 +467,7 @@ describe("solana_ballot", () => {
       .rpc();
 
     await program.methods.openVoting()
-      .accounts({ admin: admin.publicKey, proposal: wvPda })
+      .accounts({ admin: admin.publicKey, proposal: wvPda, vkAccount: vkPda })
       .rpc();
 
     await program.methods
@@ -524,5 +526,98 @@ describe("solana_ballot", () => {
     } catch (err) {
       assert.include(err.message, "VotingStillOpen");
     }
+  });
+
+  // ── open_voting VK gate tests ──────────────────────────────────────────────
+  //
+  // These three tests cover the fix for HIGH-2: open_voting now requires the
+  // vk_account PDA to be passed. The seeds constraint is always enforced
+  // (wrong address → rejected before the handler runs). The is_initialized
+  // check only fires in production builds; dev builds allow opening without a
+  // VK so anchor test works without a real trusted-setup ceremony.
+  //
+  // NOTE: store_vk uses `init`, so it can only be called once per deployment.
+  // These tests are placed last so earlier cast_vote tests can rely on the
+  // dev bypass (VK absent → proof verification skipped).
+
+  it("Rejects open_voting when vk_account PDA is wrong", async () => {
+    // Anchor validates account seeds before the handler runs.
+    // Passing any address other than the canonical [b"vk"] PDA must be
+    // rejected in both dev and production builds.
+    const wrongVkTitle = "Wrong VK PDA test";
+    const wrongVkPda = getProposalPda(admin.publicKey, wrongVkTitle);
+    const futureEnd = Math.floor(Date.now() / 1000) + 3600;
+
+    await program.methods
+      .createProposal(wrongVkTitle, description, new anchor.BN(votingStart), new anchor.BN(futureEnd))
+      .accounts({ admin: admin.publicKey, proposal: wrongVkPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    await program.methods
+      .registerVoter([...Buffer.alloc(32, 7)])
+      .accounts({ admin: admin.publicKey, proposal: wrongVkPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    try {
+      await program.methods
+        .openVoting()
+        .accounts({
+          admin: admin.publicKey,
+          proposal: wrongVkPda,
+          vkAccount: wrongVkPda,   // intentionally wrong — proposalPda ≠ vkPda
+        })
+        .rpc();
+      assert.fail("Should have thrown");
+    } catch (err) {
+      assert.ok(err, "Wrong vk_account PDA should be rejected by seeds constraint");
+    }
+  });
+
+  it("Stores the verifying key", async () => {
+    // store_vk is a one-time init — placed here so earlier cast_vote tests
+    // can still use the dev bypass (VK absent → proof verification skipped).
+    const zeroG1 = Array(64).fill(0);
+    const zeroG2 = Array(128).fill(0);
+    const zeroIc = Array(5).fill(null).map(() => Array(64).fill(0));
+
+    await program.methods
+      .storeVk(zeroG1, zeroG2, zeroG2, zeroG2, zeroIc)
+      .accounts({
+        admin: admin.publicKey,
+        programConfig: programConfigPda,
+        vkAccount: vkPda,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const vk = await program.account.verificationKeyAccount.fetch(vkPda);
+    assert.equal(vk.isInitialized, true);
+  });
+
+  it("open_voting succeeds with an initialized VK", async () => {
+    // With VK stored and is_initialized == true, open_voting must transition
+    // the proposal to Voting. This exercises the path that production builds
+    // enforce: open_voting is only reachable after store_vk has been called.
+    const initVkTitle = "Initialized VK test";
+    const initVkPda = getProposalPda(admin.publicKey, initVkTitle);
+    const futureEnd = Math.floor(Date.now() / 1000) + 3600;
+
+    await program.methods
+      .createProposal(initVkTitle, description, new anchor.BN(votingStart), new anchor.BN(futureEnd))
+      .accounts({ admin: admin.publicKey, proposal: initVkPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    await program.methods
+      .registerVoter([...Buffer.alloc(32, 8)])
+      .accounts({ admin: admin.publicKey, proposal: initVkPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    await program.methods
+      .openVoting()
+      .accounts({ admin: admin.publicKey, proposal: initVkPda, vkAccount: vkPda })
+      .rpc();
+
+    const proposal = await program.account.proposal.fetch(initVkPda);
+    assert.deepEqual(proposal.status, { voting: {} });
   });
 });

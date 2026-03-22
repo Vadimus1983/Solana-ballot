@@ -1,6 +1,8 @@
 use anchor_lang::prelude::*;
 use crate::state::proposal::{Proposal, ProposalStatus};
+use crate::state::vk::VerificationKeyAccount;
 use crate::error::BallotError;
+use crate::constants::SEED_VK;
 
 /// Transitions the proposal from Registration → Voting.
 ///
@@ -17,7 +19,34 @@ use crate::error::BallotError;
 /// - At least one voter must be registered. Opening an empty election is
 ///   almost certainly a mistake, and an empty Merkle tree would make every
 ///   proof trivially invalid.
+/// - **VK must be initialized** (production builds): the verifying key must be
+///   stored on-chain before voting opens. Without it every `cast_vote` would
+///   fail, permanently bricking the election. Dev builds skip this check so
+///   `anchor test` works without a real trusted-setup ceremony.
 pub fn handler(ctx: Context<OpenVoting>) -> Result<()> {
+    // ── VK gate (production only) ─────────────────────────────────────────────
+    //
+    // Require the verifying key to be on-chain and initialized before the
+    // election transitions to Voting. Without a VK every cast_vote fails with
+    // VkNotInitialized, permanently bricking the election since store_vk uses
+    // `init` (one-time) and the proposal cannot revert to Registration.
+    //
+    // In dev builds the check is skipped so `anchor test` works without a real
+    // Groth16 trusted-setup ceremony (matches the bypass in cast_vote.rs).
+    #[cfg(not(feature = "dev"))]
+    {
+        let data = ctx.accounts.vk_account.try_borrow_data()?;
+        let vk_ok = if data.len() >= VerificationKeyAccount::LEN {
+            let mut slice: &[u8] = &data;
+            VerificationKeyAccount::try_deserialize(&mut slice)
+                .map(|vk| vk.is_initialized)
+                .unwrap_or(false)
+        } else {
+            false
+        };
+        require!(vk_ok, BallotError::VkNotInitialized);
+    }
+
     let proposal = &mut ctx.accounts.proposal;
     let clock = Clock::get()?;
 
@@ -53,7 +82,6 @@ pub fn handler(ctx: Context<OpenVoting>) -> Result<()> {
 #[derive(Accounts)]
 pub struct OpenVoting<'info> {
     /// The proposal admin. Must match `proposal.admin`.
-    #[account(mut)]
     pub admin: Signer<'info>,
 
     /// The proposal being transitioned to Voting status.
@@ -63,4 +91,11 @@ pub struct OpenVoting<'info> {
         has_one = admin @ BallotError::Unauthorized,
     )]
     pub proposal: Account<'info, Proposal>,
+
+    /// CHECK: Groth16 VK PDA — seeds validated. The handler manually checks
+    /// that the account is initialized before allowing the transition to Voting
+    /// in production builds. In dev builds the check is skipped for
+    /// `anchor test` compatibility (mirrors the pattern in cast_vote.rs).
+    #[account(seeds = [SEED_VK], bump)]
+    pub vk_account: UncheckedAccount<'info>,
 }
