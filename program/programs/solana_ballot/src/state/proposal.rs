@@ -48,6 +48,10 @@ pub struct Proposal {
     /// Number of revealed no votes (0) after voting closes
     pub no_count: u64,
 
+    /// Number of (NullifierRecord, VoteRecord) pairs closed via close_vote_accounts.
+    /// close_proposal requires this equals vote_count so no rent is permanently stranded.
+    pub closed_vote_count: u64,
+
     /// PDA bump seed for address derivation
     pub bump: u8,
 }
@@ -85,6 +89,7 @@ impl Proposal {
         + 8                                        // vote_count
         + 8                                        // yes_count
         + 8                                        // no_count
+        + 8                                        // closed_vote_count
         + 1;                                       // bump
 }
 

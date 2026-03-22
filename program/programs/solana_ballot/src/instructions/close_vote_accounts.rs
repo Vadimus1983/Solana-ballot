@@ -10,8 +10,8 @@ use crate::constants::*;
 /// Permissionless: any account may call this once finalization is complete.
 /// The Anchor `close` constraint zeroes the account data and sets the closed
 /// discriminator, preventing resurrection attacks.
-pub fn handler(_ctx: Context<CloseVoteAccounts>) -> Result<()> {
-    // All work is performed by the `close` constraints — no handler body needed.
+pub fn handler(ctx: Context<CloseVoteAccounts>) -> Result<()> {
+    ctx.accounts.proposal.closed_vote_count += 1;
     Ok(())
 }
 
@@ -22,7 +22,9 @@ pub struct CloseVoteAccounts<'info> {
     pub closer: Signer<'info>,
 
     /// Proposal must be Finalized before vote records can be reclaimed.
+    /// Marked `mut` so the handler can increment `closed_vote_count`.
     #[account(
+        mut,
         seeds = [SEED_PROPOSAL, proposal.admin.as_ref(), proposal.title_seed.as_ref()],
         bump = proposal.bump,
         constraint = proposal.status == ProposalStatus::Finalized @ BallotError::NotFinalized,

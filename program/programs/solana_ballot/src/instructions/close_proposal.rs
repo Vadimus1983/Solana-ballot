@@ -7,8 +7,9 @@ use crate::constants::SEED_PROPOSAL;
 /// to the admin.
 ///
 /// Callable only by the proposal admin after finalization. All vote accounts
-/// (NullifierRecord, VoteRecord) should be closed via `close_vote_accounts`
-/// before closing the proposal so that rent is fully reclaimed.
+/// (NullifierRecord, VoteRecord) must be closed via `close_vote_accounts`
+/// first — the `closed_vote_count >= vote_count` constraint enforces this,
+/// preventing rent from being permanently stranded in unclosed vote records.
 pub fn handler(_ctx: Context<CloseProposal>) -> Result<()> {
     // All work is performed by the `close = admin` constraint.
     Ok(())
@@ -25,6 +26,7 @@ pub struct CloseProposal<'info> {
         seeds = [SEED_PROPOSAL, proposal.admin.as_ref(), proposal.title_seed.as_ref()],
         bump = proposal.bump,
         constraint = proposal.status == ProposalStatus::Finalized @ BallotError::NotFinalized,
+        constraint = proposal.closed_vote_count >= proposal.vote_count @ BallotError::VoteAccountsNotClosed,
         close = admin,
     )]
     pub proposal: Account<'info, Proposal>,

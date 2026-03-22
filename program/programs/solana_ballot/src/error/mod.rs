@@ -58,4 +58,7 @@ pub enum BallotError {
 
     #[msg("Proposal is not yet finalized")]
     NotFinalized,
+
+    #[msg("All vote accounts must be closed before the proposal can be closed")]
+    VoteAccountsNotClosed,
 }
