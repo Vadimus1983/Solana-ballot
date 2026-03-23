@@ -45,7 +45,7 @@ pub struct CloseCommitmentRecord<'info> {
         mut,
         seeds = [SEED_PROPOSAL, proposal.admin.as_ref(), proposal.title_seed.as_ref()],
         bump = proposal.bump,
-        constraint = proposal.status == ProposalStatus::Finalized @ BallotError::NotFinalized,
+        constraint = proposal.status.is_terminal() @ BallotError::NotFinalized,
     )]
     pub proposal: Account<'info, Proposal>,
 

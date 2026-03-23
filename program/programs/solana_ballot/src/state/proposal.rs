@@ -109,4 +109,14 @@ pub enum ProposalStatus {
     Closed,
     /// Tally is complete, result is final
     Finalized,
+    /// Voting window elapsed without the admin calling open_voting;
+    /// commitment records can be closed and the proposal account reclaimed
+    Expired,
+}
+
+impl ProposalStatus {
+    /// Returns true for states where all accounts can be closed and rent reclaimed.
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, ProposalStatus::Finalized | ProposalStatus::Expired)
+    }
 }

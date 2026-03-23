@@ -1241,4 +1241,117 @@ describe("solana_ballot", () => {
       assert.ok(err, "Closed proposal account should not be fetchable");
     }
   });
+
+  // ── expire_proposal tests ──────────────────────────────────────────────────
+
+  it("Rejects expire_proposal before voting_end", async () => {
+    // A fresh proposal with voting_end = now + 3600 cannot be expired yet.
+    const expTitle = "Expire early test";
+    const expPda = getProposalPda(admin.publicKey, expTitle);
+    const nowLocal = Math.floor(Date.now() / 1000);
+
+    await program.methods
+      .createProposal(expTitle, description, new anchor.BN(nowLocal - 1), new anchor.BN(nowLocal + 3600))
+      .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: expPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    try {
+      await program.methods
+        .expireProposal()
+        .accounts({ caller: admin.publicKey, proposal: expPda })
+        .rpc();
+      assert.fail("Should have thrown");
+    } catch (err) {
+      assert.include(err.message, "VotingWindowNotExpired");
+    }
+  });
+
+  it("Rejects expire_proposal when status is not Registration", async () => {
+    // The main proposalPda is now Closed (before finalization tests ran).
+    // expire_proposal requires Registration status — any other status must fail.
+    // We use a locally-created Voting-phase proposal to cover the non-Registration path.
+    const expVotTitle = "Expire voting test";
+    const expVotPda = getProposalPda(admin.publicKey, expVotTitle);
+    const nowLocal = Math.floor(Date.now() / 1000);
+
+    await program.methods
+      .createProposal(expVotTitle, description, new anchor.BN(nowLocal - 1), new anchor.BN(nowLocal + 3600))
+      .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: expVotPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    await program.methods
+      .registerVoter([...Buffer.alloc(32, 0x09)])
+      .accounts({ admin: admin.publicKey, proposal: expVotPda, commitmentRecord: getCommitmentRecordPda(expVotPda, Buffer.alloc(32, 0x09)), systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    await program.methods
+      .openVoting()
+      .accounts({ admin: admin.publicKey, proposal: expVotPda, vkAccount: vkPda })
+      .rpc();
+
+    // Proposal is now in Voting status — expire_proposal must reject.
+    try {
+      await program.methods
+        .expireProposal()
+        .accounts({ caller: admin.publicKey, proposal: expVotPda })
+        .rpc();
+      assert.fail("Should have thrown");
+    } catch (err) {
+      assert.include(err.message, "NotInRegistration");
+    }
+  });
+
+  it("Expires a proposal that was never opened and reclaims all rent", async () => {
+    // A proposal stuck in Registration past voting_end must be expirable
+    // by anyone, and its commitment records + account must be closeable afterward.
+    const stuckTitle = "Stuck registration test";
+    const stuckNow = Math.floor(Date.now() / 1000);
+    const stuckPda = getProposalPda(admin.publicKey, stuckTitle);
+    const stuckCommitment = Buffer.alloc(32, 0x0a);
+    const stuckCommitmentPda = getCommitmentRecordPda(stuckPda, stuckCommitment);
+
+    await program.methods
+      .createProposal(stuckTitle, description, new anchor.BN(stuckNow - 1), new anchor.BN(stuckNow + 2))
+      .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: stuckPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    await program.methods
+      .registerVoter([...stuckCommitment])
+      .accounts({ admin: admin.publicKey, proposal: stuckPda, commitmentRecord: stuckCommitmentPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+
+    // Wait for voting_end to pass without calling open_voting.
+    await new Promise(r => setTimeout(r, 3000));
+
+    // Any caller can expire the proposal.
+    await program.methods
+      .expireProposal()
+      .accounts({ caller: admin.publicKey, proposal: stuckPda })
+      .rpc();
+
+    let stuck = await program.account.proposal.fetch(stuckPda);
+    assert.equal(stuck.status.expired !== undefined, true, "status should be Expired");
+
+    // Close the commitment record — works because Expired is terminal.
+    await program.methods
+      .closeCommitmentRecord()
+      .accounts({ closer: admin.publicKey, proposal: stuckPda, commitmentRecord: stuckCommitmentPda })
+      .rpc();
+
+    stuck = await program.account.proposal.fetch(stuckPda);
+    assert.equal(stuck.closedCommitmentCount.toNumber(), 1, "closedCommitmentCount should be 1");
+
+    // Close the proposal itself — vote_count=0 so closed_vote_count>=vote_count trivially.
+    await program.methods
+      .closeProposal()
+      .accounts({ admin: admin.publicKey, proposal: stuckPda })
+      .rpc();
+
+    try {
+      await program.account.proposal.fetch(stuckPda);
+      assert.fail("Should have thrown");
+    } catch (err) {
+      assert.ok(err, "Expired proposal account should be gone after close");
+    }
+  });
 });

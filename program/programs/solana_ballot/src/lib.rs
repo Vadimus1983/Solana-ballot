@@ -11,6 +11,7 @@ use instructions::{
     initialize::*, create_proposal::*, register_voter::*, open_voting::*,
     store_vk::*, cast_vote::*, close_voting::*, reveal_vote::*, finalize_tally::*,
     close_vote_accounts::*, close_commitment_record::*, close_proposal::*,
+    expire_proposal::*,
 };
 
 declare_id!("2h52sCAKhKtBFdyTfa3XamcWXkZB6M3D7XknNNfkQivZ");
@@ -177,5 +178,14 @@ pub mod solana_ballot {
     /// `close_vote_accounts` and `close_commitment_record`.
     pub fn close_proposal(ctx: Context<CloseProposal>) -> Result<()> {
         instructions::close_proposal::handler(ctx)
+    }
+
+    /// Transitions a Registration proposal to Expired after its voting window
+    /// elapses without the admin calling open_voting.
+    ///
+    /// Permissionless — any account may call this once `voting_end` has passed.
+    /// After expiry, `close_commitment_record` and `close_proposal` reclaim all rent.
+    pub fn expire_proposal(ctx: Context<ExpireProposal>) -> Result<()> {
+        instructions::expire_proposal::handler(ctx)
     }
 }

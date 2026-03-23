@@ -65,6 +65,9 @@ pub enum BallotError {
     #[msg("All commitment accounts must be closed before the proposal can be closed")]
     CommitmentAccountsNotClosed,
 
+    #[msg("Voting window has not yet expired — call open_voting or wait for voting_end")]
+    VotingWindowNotExpired,
+
     #[msg("Commitment must be a non-zero BN254 field element (0 < commitment < p)")]
     InvalidCommitment,
 
