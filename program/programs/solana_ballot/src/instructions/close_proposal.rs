@@ -27,6 +27,7 @@ pub struct CloseProposal<'info> {
         bump = proposal.bump,
         constraint = proposal.status == ProposalStatus::Finalized @ BallotError::NotFinalized,
         constraint = proposal.closed_vote_count >= proposal.vote_count @ BallotError::VoteAccountsNotClosed,
+        constraint = proposal.closed_commitment_count >= proposal.voter_count @ BallotError::CommitmentAccountsNotClosed,
         close = admin,
     )]
     pub proposal: Account<'info, Proposal>,

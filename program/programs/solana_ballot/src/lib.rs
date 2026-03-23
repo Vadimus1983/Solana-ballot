@@ -10,7 +10,7 @@ pub mod state;
 use instructions::{
     initialize::*, create_proposal::*, register_voter::*, open_voting::*,
     store_vk::*, cast_vote::*, close_voting::*, reveal_vote::*, finalize_tally::*,
-    close_vote_accounts::*, close_proposal::*,
+    close_vote_accounts::*, close_commitment_record::*, close_proposal::*,
 };
 
 declare_id!("2h52sCAKhKtBFdyTfa3XamcWXkZB6M3D7XknNNfkQivZ");
@@ -164,8 +164,17 @@ pub mod solana_ballot {
         instructions::close_vote_accounts::handler(ctx)
     }
 
+    /// Closes a single CommitmentRecord PDA for a finalized proposal,
+    /// returning the rent-exempt lamports to the caller.
+    /// Permissionless — any account may reclaim rent after finalization.
+    /// The commitment value is read from the account itself; no parameter needed.
+    pub fn close_commitment_record(ctx: Context<CloseCommitmentRecord>) -> Result<()> {
+        instructions::close_commitment_record::handler(ctx)
+    }
+
     /// Closes a finalized Proposal account, returning rent to the admin.
-    /// All associated vote accounts should be closed first via `close_vote_accounts`.
+    /// All vote accounts and commitment records must be closed first via
+    /// `close_vote_accounts` and `close_commitment_record`.
     pub fn close_proposal(ctx: Context<CloseProposal>) -> Result<()> {
         instructions::close_proposal::handler(ctx)
     }

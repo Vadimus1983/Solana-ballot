@@ -23,13 +23,25 @@ impl VoteRecord {
 
 /// One account per (proposal, commitment) pair — its existence prevents the same
 /// commitment from being inserted into the Merkle tree more than once.
+///
+/// Stores the commitment value so the account is self-describing: any holder of
+/// an on-chain RPC connection can enumerate all CommitmentRecord accounts for a
+/// proposal and close them via `close_commitment_record` without any off-chain
+/// data (event logs or admin records).
 #[account]
 pub struct CommitmentRecord {
+    /// The voter commitment registered for this proposal.
+    /// Stored here (rather than derived from seeds) so the account can be closed
+    /// permissionlessly after finalization without requiring the caller to supply
+    /// the commitment value from off-chain sources.
+    pub commitment: [u8; HASH_SIZE],
     pub bump: u8,
 }
 
 impl CommitmentRecord {
-    pub const LEN: usize = ANCHOR_DISCRIMINATOR + 1; // bump
+    pub const LEN: usize = ANCHOR_DISCRIMINATOR
+        + HASH_SIZE  // commitment
+        + 1;         // bump
 }
 
 /// One account per nullifier — its existence means the nullifier is spent

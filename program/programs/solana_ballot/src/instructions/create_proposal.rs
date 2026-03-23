@@ -56,8 +56,9 @@ pub fn handler(
     proposal.vote_count        = 0;
     proposal.yes_count         = 0;
     proposal.no_count          = 0;
-    proposal.closed_vote_count = 0;
-    proposal.bump              = ctx.bumps.proposal;
+    proposal.closed_vote_count       = 0;
+    proposal.closed_commitment_count = 0;
+    proposal.bump                    = ctx.bumps.proposal;
 
     msg!("Proposal created: {:?}", proposal.title);
     Ok(())

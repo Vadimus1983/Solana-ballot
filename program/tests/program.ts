@@ -34,11 +34,12 @@ describe("solana_ballot", () => {
 
   const admin = provider.wallet;
 
-  // Voting period: already started, ends 2 seconds from now.
-  // The short window lets close_voting (which enforces now >= voting_end) succeed
-  // after a brief sleep without slowing the test suite significantly.
+  // Voting period: already started, ends 10 seconds from now.
+  // The window must be long enough for all setup tests (initialize, create,
+  // register, store_vk) to complete before open_voting runs.
+  // The sleep in "Closes voting" is adjusted to match.
   const votingStart = Math.floor(Date.now() / 1000) - 1;
-  const votingEnd = Math.floor(Date.now() / 1000) + 2;
+  const votingEnd = Math.floor(Date.now() / 1000) + 10;
   const title = "Fund marketing campaign";
   const description = "Allocate 100k USDC to marketing";
 
@@ -282,7 +283,7 @@ describe("solana_ballot", () => {
 
   it("Closes voting", async () => {
     // Wait for voting_end to pass — close_voting enforces now >= voting_end.
-    await new Promise(r => setTimeout(r, 3000));
+    await new Promise(r => setTimeout(r, 11000));
 
     await program.methods
       .closeVoting()
@@ -939,7 +940,7 @@ describe("solana_ballot", () => {
 
     // ── Setup ──────────────────────────────────────────────────────────────
     await program.methods
-      .createProposal(partTitle, description, new anchor.BN(now - 1), new anchor.BN(now + 2))
+      .createProposal(partTitle, description, new anchor.BN(now - 1), new anchor.BN(now + 15))
       .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: partPda, systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
@@ -960,7 +961,7 @@ describe("solana_ballot", () => {
         .rpc();
     }
 
-    await new Promise(r => setTimeout(r, 3000));
+    await new Promise(r => setTimeout(r, 16000));
     await program.methods.closeVoting().accounts({ closer: admin.publicKey, proposal: partPda }).rpc();
 
     // Reveal both votes so all_revealed=true and finalizeTally succeeds without
@@ -997,7 +998,25 @@ describe("solana_ballot", () => {
     part = await program.account.proposal.fetch(partPda);
     assert.equal(part.closedVoteCount.toNumber(), 2, "closed_vote_count should be 2 after second pair");
 
-    // All pairs closed → close_proposal must now succeed
+    // All vote pairs closed but commitment records still open → must still reject
+    try {
+      await program.methods.closeProposal().accounts({ admin: admin.publicKey, proposal: partPda }).rpc();
+      assert.fail("Should have thrown");
+    } catch (err) {
+      assert.include(err.message, "CommitmentAccountsNotClosed");
+    }
+
+    // ── Close both commitment records ──────────────────────────────────────
+    for (const c of [Buffer.alloc(32, 0x05), Buffer.alloc(32, 0x06)]) {
+      await program.methods.closeCommitmentRecord()
+        .accounts({ closer: admin.publicKey, proposal: partPda, commitmentRecord: getCommitmentRecordPda(partPda, c) })
+        .rpc();
+    }
+
+    part = await program.account.proposal.fetch(partPda);
+    assert.equal(part.closedCommitmentCount.toNumber(), 2, "closed_commitment_count should be 2");
+
+    // All vote pairs and commitment records closed → close_proposal must now succeed
     await program.methods.closeProposal().accounts({ admin: admin.publicKey, proposal: partPda }).rpc();
 
     try {
@@ -1021,10 +1040,11 @@ describe("solana_ballot", () => {
     // rejected in both dev and production builds.
     const wrongVkTitle = "Wrong VK PDA test";
     const wrongVkPda = getProposalPda(admin.publicKey, wrongVkTitle);
-    const futureEnd = Math.floor(Date.now() / 1000) + 3600;
+    const nowLocal = Math.floor(Date.now() / 1000);
+    const futureEnd = nowLocal + 3600;
 
     await program.methods
-      .createProposal(wrongVkTitle, description, new anchor.BN(votingStart), new anchor.BN(futureEnd))
+      .createProposal(wrongVkTitle, description, new anchor.BN(nowLocal - 1), new anchor.BN(futureEnd))
       .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: wrongVkPda, systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
@@ -1054,10 +1074,11 @@ describe("solana_ballot", () => {
     // enforce: open_voting is only reachable after store_vk has been called.
     const initVkTitle = "Initialized VK test";
     const initVkPda = getProposalPda(admin.publicKey, initVkTitle);
-    const futureEnd = Math.floor(Date.now() / 1000) + 3600;
+    const nowLocal = Math.floor(Date.now() / 1000);
+    const futureEnd = nowLocal + 3600;
 
     await program.methods
-      .createProposal(initVkTitle, description, new anchor.BN(votingStart), new anchor.BN(futureEnd))
+      .createProposal(initVkTitle, description, new anchor.BN(nowLocal - 1), new anchor.BN(futureEnd))
       .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: initVkPda, systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
@@ -1106,10 +1127,11 @@ describe("solana_ballot", () => {
   it("Rejects close_proposal before finalization", async () => {
     const preTitle = "Pre-finalize close test";
     const prePda = getProposalPda(admin.publicKey, preTitle);
-    const futureEnd = Math.floor(Date.now() / 1000) + 3600;
+    const nowLocal = Math.floor(Date.now() / 1000);
+    const futureEnd = nowLocal + 3600;
 
     await program.methods
-      .createProposal(preTitle, description, new anchor.BN(votingStart), new anchor.BN(futureEnd))
+      .createProposal(preTitle, description, new anchor.BN(nowLocal - 1), new anchor.BN(futureEnd))
       .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: prePda, systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
@@ -1164,7 +1186,49 @@ describe("solana_ballot", () => {
     assert.equal(proposal.closedVoteCount.toNumber(), 1, "closedVoteCount should be 1 after closing the vote pair");
   });
 
+  it("Rejects close_proposal when commitment records remain unclosed", async () => {
+    // proposalPda is Finalized with voter_count=1 and closed_commitment_count=0.
+    // close_proposal must fail until the CommitmentRecord is closed.
+    try {
+      await program.methods
+        .closeProposal()
+        .accounts({ admin: admin.publicKey, proposal: proposalPda })
+        .rpc();
+      assert.fail("Should have thrown");
+    } catch (err) {
+      assert.include(err.message, "CommitmentAccountsNotClosed");
+    }
+  });
+
+  it("Closes commitment record after finalization", async () => {
+    // The main proposal has voter_count=1; commitment = Buffer.alloc(32, 1).
+    // Closing it reclaims the admin's registration rent and increments
+    // closed_commitment_count so close_proposal can proceed.
+    const commitmentRecordPda = getCommitmentRecordPda(proposalPda, commitment);
+
+    await program.methods
+      .closeCommitmentRecord()
+      .accounts({
+        closer: admin.publicKey,
+        proposal: proposalPda,
+        commitmentRecord: commitmentRecordPda,
+      })
+      .rpc();
+
+    assert.isNull(
+      await provider.connection.getAccountInfo(commitmentRecordPda),
+      "CommitmentRecord should be closed"
+    );
+
+    const proposal = await program.account.proposal.fetch(proposalPda);
+    assert.equal(
+      proposal.closedCommitmentCount.toNumber(), 1,
+      "closedCommitmentCount should be 1 after closing the commitment record"
+    );
+  });
+
   it("Closes proposal after finalization", async () => {
+    // All vote accounts and commitment records are now closed.
     await program.methods
       .closeProposal()
       .accounts({ admin: admin.publicKey, proposal: proposalPda })

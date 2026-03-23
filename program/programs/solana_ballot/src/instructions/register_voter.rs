@@ -28,6 +28,11 @@ pub fn handler(ctx: Context<RegisterVoter>, commitment: [u8; HASH_SIZE]) -> Resu
     // commitment_record is initialized via `init`. If the same commitment has
     // already been registered for this proposal, `init` fails because the PDA
     // already exists — preventing Merkle tree slot exhaustion via duplicates.
+    //
+    // The commitment value is stored in the account so close_commitment_record
+    // can derive and verify the PDA address without the caller supplying it
+    // from off-chain sources, enabling fully permissionless cleanup.
+    ctx.accounts.commitment_record.commitment = commitment;
     ctx.accounts.commitment_record.bump = ctx.bumps.commitment_record;
 
     // Insert commitment as a new leaf in the incremental Merkle tree.

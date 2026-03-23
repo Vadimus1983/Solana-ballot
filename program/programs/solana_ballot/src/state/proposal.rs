@@ -52,6 +52,11 @@ pub struct Proposal {
     /// close_proposal requires this equals vote_count so no rent is permanently stranded.
     pub closed_vote_count: u64,
 
+    /// Number of CommitmentRecord PDAs closed via close_commitment_record.
+    /// close_proposal requires this equals voter_count so no registration rent is
+    /// permanently stranded in orphaned CommitmentRecord accounts.
+    pub closed_commitment_count: u64,
+
     /// PDA bump seed for address derivation
     pub bump: u8,
 }
@@ -90,6 +95,7 @@ impl Proposal {
         + 8                                        // yes_count
         + 8                                        // no_count
         + 8                                        // closed_vote_count
+        + 8                                        // closed_commitment_count
         + 1;                                       // bump
 }
 
