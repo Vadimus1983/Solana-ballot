@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 use crate::state::proposal::{Proposal, ProposalStatus};
-use crate::state::vote::CommitmentRecord;
+use crate::state::vote::{CommitmentRecord, VoterRecord};
 use crate::error::BallotError;
 use crate::constants::*;
 use crate::merkle::insert_leaf;
@@ -29,11 +29,17 @@ pub fn handler(ctx: Context<RegisterVoter>, commitment: [u8; HASH_SIZE]) -> Resu
     // already been registered for this proposal, `init` fails because the PDA
     // already exists — preventing Merkle tree slot exhaustion via duplicates.
     //
-    // The commitment value is stored in the account so close_commitment_record
-    // can derive and verify the PDA address without the caller supplying it
-    // from off-chain sources, enabling fully permissionless cleanup.
+    // The commitment value and voter pubkey are stored so close_commitment_record
+    // can derive and verify both PDAs without the caller supplying off-chain data,
+    // enabling fully permissionless cleanup.
     ctx.accounts.commitment_record.commitment = commitment;
+    ctx.accounts.commitment_record.voter = ctx.accounts.voter.key();
     ctx.accounts.commitment_record.bump = ctx.bumps.commitment_record;
+
+    // voter_record is initialized via `init`. If the same voter pubkey has already
+    // registered for this proposal (with any commitment), `init` fails — preventing
+    // double registration by a colluding admin even when different commitments are used.
+    ctx.accounts.voter_record.bump = ctx.bumps.voter_record;
 
     // Insert commitment as a new leaf in the incremental Merkle tree.
     // voter_count before incrementing is the index of the new leaf.
@@ -70,6 +76,11 @@ pub struct RegisterVoter<'info> {
     #[account(mut)]
     pub admin: Signer<'info>,
 
+    /// The voter being registered. Must co-sign so the admin cannot register a
+    /// different commitment under the same voter identity without the voter's key,
+    /// and so one Solana identity maps to at most one commitment per proposal.
+    pub voter: Signer<'info>,
+
     #[account(
         mut,
         has_one = admin @ BallotError::Unauthorized,
@@ -78,9 +89,8 @@ pub struct RegisterVoter<'info> {
     )]
     pub proposal: Account<'info, Proposal>,
 
-    // Uniqueness guard: creating this PDA proves the commitment is fresh for
-    // this proposal. A second call with the same commitment bytes fails because
-    // the account already exists, preventing duplicate tree insertions.
+    /// Commitment uniqueness guard: a second call with the same commitment bytes
+    /// fails because the PDA already exists, preventing duplicate Merkle insertions.
     #[account(
         init,
         payer = admin,
@@ -89,6 +99,18 @@ pub struct RegisterVoter<'info> {
         bump,
     )]
     pub commitment_record: Account<'info, CommitmentRecord>,
+
+    /// Identity uniqueness guard: a second call with the same voter pubkey fails
+    /// because the PDA already exists, preventing double registration even when
+    /// different commitment values are supplied.
+    #[account(
+        init,
+        payer = admin,
+        space = VoterRecord::LEN,
+        seeds = [SEED_VOTER, proposal.key().as_ref(), voter.key().as_ref()],
+        bump,
+    )]
+    pub voter_record: Account<'info, VoterRecord>,
 
     pub system_program: Program<'info, System>,
 }

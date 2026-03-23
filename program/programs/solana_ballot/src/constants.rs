@@ -45,6 +45,7 @@ pub const SEED_PROPOSAL: &[u8] = b"proposal";
 pub const SEED_NULLIFIER: &[u8] = b"nullifier";
 pub const SEED_VOTE: &[u8] = b"vote";
 pub const SEED_COMMITMENT: &[u8] = b"commitment";
+pub const SEED_VOTER: &[u8] = b"voter";
 pub const SEED_VK: &[u8] = b"vk";
 pub const SEED_CONFIG: &[u8] = b"config";
 

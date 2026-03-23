@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 use crate::state::proposal::{Proposal, ProposalStatus};
-use crate::state::vote::CommitmentRecord;
+use crate::state::vote::{CommitmentRecord, VoterRecord};
 use crate::error::BallotError;
 use crate::constants::*;
 
@@ -60,4 +60,16 @@ pub struct CloseCommitmentRecord<'info> {
         close = closer,
     )]
     pub commitment_record: Account<'info, CommitmentRecord>,
+
+    /// Identity uniqueness guard for the voter who registered this commitment.
+    /// Derived from the voter pubkey stored in `commitment_record.voter` — no
+    /// off-chain data needed. Closed atomically so rent is fully reclaimed in
+    /// one transaction and no orphaned VoterRecord accounts can remain.
+    #[account(
+        mut,
+        seeds = [SEED_VOTER, proposal.key().as_ref(), commitment_record.voter.as_ref()],
+        bump = voter_record.bump,
+        close = closer,
+    )]
+    pub voter_record: Account<'info, VoterRecord>,
 }

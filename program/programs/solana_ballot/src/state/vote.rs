@@ -28,6 +28,9 @@ impl VoteRecord {
 /// an on-chain RPC connection can enumerate all CommitmentRecord accounts for a
 /// proposal and close them via `close_commitment_record` without any off-chain
 /// data (event logs or admin records).
+///
+/// Also stores the registering voter's Solana pubkey so `close_commitment_record`
+/// can atomically derive and close the corresponding `VoterRecord` PDA.
 #[account]
 pub struct CommitmentRecord {
     /// The voter commitment registered for this proposal.
@@ -35,13 +38,32 @@ pub struct CommitmentRecord {
     /// permissionlessly after finalization without requiring the caller to supply
     /// the commitment value from off-chain sources.
     pub commitment: [u8; HASH_SIZE],
+    /// Solana pubkey of the voter who registered this commitment.
+    /// Used by `close_commitment_record` to derive and close the `VoterRecord` PDA.
+    pub voter: Pubkey,
     pub bump: u8,
 }
 
 impl CommitmentRecord {
     pub const LEN: usize = ANCHOR_DISCRIMINATOR
-        + HASH_SIZE  // commitment
-        + 1;         // bump
+        + HASH_SIZE   // commitment
+        + PUBKEY_SIZE // voter
+        + 1;          // bump
+}
+
+/// One account per (proposal, voter_pubkey) pair — its existence prevents the same
+/// Solana identity from registering more than once per proposal, regardless of
+/// which commitment bytes they supply.
+///
+/// Closed atomically alongside its corresponding `CommitmentRecord` by
+/// `close_commitment_record`, so no separate cleanup instruction is needed.
+#[account]
+pub struct VoterRecord {
+    pub bump: u8,
+}
+
+impl VoterRecord {
+    pub const LEN: usize = ANCHOR_DISCRIMINATOR + 1; // bump
 }
 
 /// One account per nullifier — its existence means the nullifier is spent

@@ -49,6 +49,12 @@ pub mod solana_ballot {
     /// The commitment is `Poseidon(secret_key, randomness)` computed off-chain by the voter.
     /// Voters must register before voting opens — they cannot register retroactively.
     ///
+    /// Both the admin and the voter must sign. The voter co-signature binds one
+    /// Solana identity to exactly one commitment per proposal: a `VoterRecord` PDA
+    /// seeded by the voter's pubkey is initialized atomically, so any attempt to
+    /// register the same Solana keypair twice — even with a different commitment —
+    /// is rejected on-chain.
+    ///
     /// # Parameters
     /// - `commitment` — 32-byte Poseidon hash of the voter's secret key and randomness.
     ///                  This is the voter's leaf in the eligibility Merkle tree.
