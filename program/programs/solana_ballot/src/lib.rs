@@ -159,7 +159,11 @@ pub mod solana_ballot {
     /// Finalizes the tally and marks the proposal as complete.
     /// Emits a `ProposalFinalized` event with the final yes/no counts.
     /// Transitions the proposal from Closed → Finalized.
-    /// Can only be called by the admin after voting is closed.
+    ///
+    /// Permissionless — any account may finalize once all votes are revealed
+    /// or the reveal grace period has expired. This mirrors the design of
+    /// `close_voting`: the admin cannot block finalization by disappearing
+    /// after the election ends.
     pub fn finalize_tally(ctx: Context<FinalizeTally>) -> Result<()> {
         instructions::finalize_tally::handler(ctx)
     }
