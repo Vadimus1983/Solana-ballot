@@ -51,6 +51,49 @@ fn verify_groth16(
     verifier.verify().map_err(|_| error!(BallotError::InvalidProof))
 }
 
+/// Initialises a NullifierRecord in a dedicated stack frame.
+///
+/// Marked `#[inline(never)]` with ≤5 parameters so all arguments fit in BPF
+/// registers r1–r5 and none spill onto the caller's stack frame as outgoing
+/// arguments. Spilled args overlap existing locals in the caller and trigger
+/// the BPF verifier's "overwrites values in the frame" error.
+#[inline(never)]
+fn init_nullifier_record(
+    record: &mut NullifierRecord,
+    proposal_id: &[u8; HASH_SIZE],
+    nullifier: &[u8; HASH_SIZE],
+    bump: u8,
+) {
+    record.proposal_id = *proposal_id;
+    record.nullifier = *nullifier;
+    record.bump = bump;
+}
+
+/// Initialises a VoteRecord in a dedicated stack frame.
+///
+/// Same `#[inline(never)]` + ≤5-parameter design as `init_nullifier_record`.
+/// `vote_record.bump` is set by the caller as a plain store (no function call),
+/// which avoids adding a sixth argument.
+#[inline(never)]
+fn init_vote_record(
+    record: &mut VoteRecord,
+    proposal_id: &[u8; HASH_SIZE],
+    vote_commitment: &[u8; HASH_SIZE],
+    nullifier: &[u8; HASH_SIZE],
+    refund_to: &Pubkey,
+) {
+    record.proposal_id = *proposal_id;
+    record.vote_commitment = *vote_commitment;
+    record.nullifier = *nullifier;
+    record.revealed = false;
+    // Sentinel 0xFF is unambiguous for indexers reading .vote without checking .revealed.
+    record.vote = VOTE_UNREVEALED;
+    // Voters who want to avoid linking their Solana identity to their nullifier
+    // should use a fresh ephemeral Solana keypair for cast_vote; the ZK proof
+    // is fully independent of the Solana signing key.
+    record.refund_to = *refund_to;
+}
+
 /// Cast a private ZK vote.
 ///
 /// # Proof encoding
@@ -167,20 +210,20 @@ pub fn handler(
               Build without --features dev for production.");
     }
 
-    let nullifier_record = &mut ctx.accounts.nullifier_record;
-    nullifier_record.proposal_id = proposal.id;
-    nullifier_record.nullifier = nullifier;
-    nullifier_record.bump = ctx.bumps.nullifier_record;
-
-    let vote_record = &mut ctx.accounts.vote_record;
-    vote_record.proposal_id = proposal.id;
-    vote_record.vote_commitment = vote_commitment;
-    vote_record.nullifier = nullifier;
-    vote_record.revealed = false;
-    // Use sentinel 0xFF — not a valid vote value (0=No, 1=Yes) — so indexers
-    // that read .vote without checking .revealed get an unambiguous signal.
-    vote_record.vote = VOTE_UNREVEALED;
-    vote_record.bump = ctx.bumps.vote_record;
+    init_nullifier_record(
+        &mut ctx.accounts.nullifier_record,
+        &proposal.id,
+        &nullifier,
+        ctx.bumps.nullifier_record,
+    );
+    init_vote_record(
+        &mut ctx.accounts.vote_record,
+        &proposal.id,
+        &vote_commitment,
+        &nullifier,
+        ctx.accounts.voter.key,
+    );
+    ctx.accounts.vote_record.bump = ctx.bumps.vote_record;
 
     proposal.vote_count = proposal.vote_count.saturating_add(1);
 

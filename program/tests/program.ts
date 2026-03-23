@@ -792,6 +792,7 @@ describe("solana_ballot", () => {
       .accounts({
         voter: admin.publicKey, proposal: cmPda, vkAccount: vkPda,
         nullifierRecord: cmNullifierPda, voteRecord: cmVoteRecordPda,
+        refundTo: admin.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .rpc();
@@ -848,6 +849,7 @@ describe("solana_ballot", () => {
       .accounts({
         voter: admin.publicKey, proposal: wvPda, vkAccount: vkPda,
         nullifierRecord: wvNullifierPda, voteRecord: wvVoteRecordPda,
+        refundTo: admin.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .rpc();
@@ -944,6 +946,7 @@ describe("solana_ballot", () => {
       .accounts({
         voter: admin.publicKey, proposal: gracePda, vkAccount: vkPda,
         nullifierRecord: graceNullifierPda, voteRecord: graceVoteRecordPda,
+        refundTo: admin.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .rpc();
@@ -1027,7 +1030,7 @@ describe("solana_ballot", () => {
 
     // ── Close first pair ───────────────────────────────────────────────────
     await program.methods.closeVoteAccounts()
-      .accounts({ closer: admin.publicKey, proposal: partPda, nullifierRecord: nulPda1, voteRecord: voteP1 })
+      .accounts({ closer: admin.publicKey, refundTo: admin.publicKey, proposal: partPda, nullifierRecord: nulPda1, voteRecord: voteP1 })
       .rpc();
 
     let part = await program.account.proposal.fetch(partPda);
@@ -1043,7 +1046,7 @@ describe("solana_ballot", () => {
 
     // ── Close second pair ──────────────────────────────────────────────────
     await program.methods.closeVoteAccounts()
-      .accounts({ closer: admin.publicKey, proposal: partPda, nullifierRecord: nulPda2, voteRecord: voteP2 })
+      .accounts({ closer: admin.publicKey, refundTo: admin.publicKey, proposal: partPda, nullifierRecord: nulPda2, voteRecord: voteP2 })
       .rpc();
 
     part = await program.account.proposal.fetch(partPda);
@@ -1219,6 +1222,7 @@ describe("solana_ballot", () => {
       .closeVoteAccounts()
       .accounts({
         closer: admin.publicKey,
+        refundTo: admin.publicKey, // matches vote_record.refund_to set during cast_vote
         proposal: proposalPda,
         nullifierRecord: nullifierRecordPda,
         voteRecord: voteRecordPda,
@@ -1364,7 +1368,7 @@ describe("solana_ballot", () => {
     const stuckCommitmentPda = getCommitmentRecordPda(stuckPda, stuckCommitment);
 
     await program.methods
-      .createProposal(stuckTitle, description, new anchor.BN(stuckNow - 1), new anchor.BN(stuckNow + 2))
+      .createProposal(stuckTitle, description, new anchor.BN(stuckNow - 1), new anchor.BN(stuckNow + 3))
       .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: stuckPda, systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
@@ -1374,7 +1378,7 @@ describe("solana_ballot", () => {
       .rpc();
 
     // Wait for voting_end to pass without calling open_voting.
-    await new Promise(r => setTimeout(r, 3000));
+    await new Promise(r => setTimeout(r, 10000));
 
     // Any caller can expire the proposal.
     await program.methods

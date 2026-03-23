@@ -8,6 +8,12 @@ pub struct VoteRecord {
     pub nullifier: [u8; HASH_SIZE],
     pub revealed: bool,
     pub vote: u8,   // 0=No, 1=Yes when revealed=true; VOTE_UNREVEALED (0xFF) otherwise
+    /// Optional address that receives the rent when this account is closed.
+    /// Set by the voter at cast time via the `refund_to` parameter.
+    /// `Pubkey::default()` (all zeros) means "no preference — route to closer".
+    /// Voters may use a fresh ephemeral key to reclaim rent without linking
+    /// their Solana identity to their nullifier on-chain.
+    pub refund_to: Pubkey,
     pub bump: u8,
 }
 
@@ -18,6 +24,7 @@ impl VoteRecord {
         + HASH_SIZE     // nullifier
         + 1             // revealed
         + 1             // vote
+        + PUBKEY_SIZE   // refund_to
         + 1;            // bump
 }
 

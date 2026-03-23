@@ -22,7 +22,7 @@ use crate::constants::SEED_PROPOSAL;
 pub fn handler(ctx: Context<ExpireProposal>) -> Result<()> {
     let clock = Clock::get()?;
     require!(
-        clock.unix_timestamp > ctx.accounts.proposal.voting_end,
+        clock.unix_timestamp >= ctx.accounts.proposal.voting_end,
         BallotError::VotingWindowNotExpired
     );
     ctx.accounts.proposal.status = ProposalStatus::Expired;

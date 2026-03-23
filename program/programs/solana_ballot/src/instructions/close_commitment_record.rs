@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use crate::state::proposal::{Proposal, ProposalStatus};
+use crate::state::proposal::Proposal;
 use crate::state::vote::{CommitmentRecord, VoterRecord};
 use crate::error::BallotError;
 use crate::constants::*;

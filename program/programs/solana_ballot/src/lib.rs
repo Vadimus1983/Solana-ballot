@@ -118,6 +118,13 @@ pub mod solana_ballot {
     ///                       Stored on-chain to prevent double voting.
     /// - `vote_commitment` — `Poseidon(vote, randomness)` — hides the vote until reveal phase.
     ///
+    /// Rent recovery: the voter's Solana signing key (`voter` account) is automatically
+    /// stored as the refund destination. `close_vote_accounts` will route the
+    /// NullifierRecord + VoteRecord rent back to that address — MEV bots cannot
+    /// redirect it. Voters who want to avoid linking their Solana identity to their
+    /// nullifier should use a fresh ephemeral Solana keypair for this call; the ZK
+    /// proof is fully independent of the Solana signing key.
+    ///
     /// Note: `merkle_root` is read from `proposal.merkle_root`, not supplied by the client.
     /// A proof generated against a stale root will fail on-chain verification.
     pub fn cast_vote(

@@ -73,4 +73,7 @@ pub enum BallotError {
 
     #[msg("Verification key contains an invalid curve point or out-of-range field element")]
     InvalidVerificationKey,
+
+    #[msg("refund_to must match the address recorded in the VoteRecord, or equal closer when no address was designated")]
+    InvalidRefundTo,
 }
