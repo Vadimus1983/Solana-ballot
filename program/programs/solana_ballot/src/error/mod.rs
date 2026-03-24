@@ -76,4 +76,10 @@ pub enum BallotError {
 
     #[msg("refund_to must match the address recorded in the VoteRecord, or equal closer when no address was designated")]
     InvalidRefundTo,
+
+    #[msg("This commitment has already been registered for this proposal")]
+    CommitmentAlreadyRegistered,
+
+    #[msg("This voter identity has already been registered for this proposal")]
+    VoterAlreadyRegistered,
 }

@@ -211,6 +211,21 @@ pub fn handler(
               Build without --features dev for production.");
     }
 
+    // Guard against pre-funded PDA squatting (init_if_needed defence).
+    //
+    // `init_if_needed` recovers squatted accounts by allocating+assigning them,
+    // leaving all data zeroed. A genuine double-vote attempt arrives with the
+    // nullifier field already set to the previous (non-zero) value, caught here
+    // before any state is modified.
+    require!(
+        ctx.accounts.nullifier_record.nullifier == [0u8; HASH_SIZE],
+        BallotError::NullifierAlreadyUsed
+    );
+    require!(
+        ctx.accounts.vote_record.vote_commitment == [0u8; HASH_SIZE],
+        BallotError::NullifierAlreadyUsed
+    );
+
     init_nullifier_record(
         &mut ctx.accounts.nullifier_record,
         &proposal.id,
@@ -263,10 +278,11 @@ pub struct CastVote<'info> {
     )]
     pub vk_account: Account<'info, VerificationKeyAccount>,
 
-    // Nullifier account — creating it proves nullifier is fresh.
-    // If it already exists, init will fail → prevents double voting.
+    /// `init_if_needed` recovers a pre-funded (squatted) PDA transparently.
+    /// Genuine double-vote attempts are caught by the handler's
+    /// `NullifierAlreadyUsed` guard on `nullifier_record.nullifier`.
     #[account(
-        init,
+        init_if_needed,
         payer = voter,
         space = NullifierRecord::LEN,
         seeds = [SEED_NULLIFIER, proposal.key().as_ref(), nullifier.as_ref()],
@@ -274,8 +290,11 @@ pub struct CastVote<'info> {
     )]
     pub nullifier_record: Account<'info, NullifierRecord>,
 
+    /// `init_if_needed` recovers a pre-funded (squatted) PDA transparently.
+    /// Genuine double-vote attempts are caught by the handler's
+    /// `NullifierAlreadyUsed` guard on `vote_record.vote_commitment`.
     #[account(
-        init,
+        init_if_needed,
         payer = voter,
         space = VoteRecord::LEN,
         seeds = [SEED_VOTE, proposal.key().as_ref(), nullifier.as_ref()],

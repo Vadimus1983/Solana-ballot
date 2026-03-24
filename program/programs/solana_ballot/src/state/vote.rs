@@ -66,11 +66,16 @@ impl CommitmentRecord {
 /// `close_commitment_record`, so no separate cleanup instruction is needed.
 #[account]
 pub struct VoterRecord {
+    /// Set to `true` by `register_voter` after all fields are written.
+    /// Used as the "already initialized" guard when `init_if_needed` is in effect,
+    /// allowing the instruction to recover pre-funded (squatted) PDAs while still
+    /// rejecting genuine double-registration attempts.
+    pub is_initialized: bool,
     pub bump: u8,
 }
 
 impl VoterRecord {
-    pub const LEN: usize = ANCHOR_DISCRIMINATOR + 1; // bump
+    pub const LEN: usize = ANCHOR_DISCRIMINATOR + 1 + 1; // is_initialized + bump
 }
 
 /// One account per nullifier — its existence means the nullifier is spent

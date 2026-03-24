@@ -25,20 +25,28 @@ pub fn handler(ctx: Context<RegisterVoter>, commitment: [u8; HASH_SIZE]) -> Resu
         BallotError::InvalidCommitment
     );
 
-    // commitment_record is initialized via `init`. If the same commitment has
-    // already been registered for this proposal, `init` fails because the PDA
-    // already exists — preventing Merkle tree slot exhaustion via duplicates.
+    // Guard against pre-funded PDA squatting (init_if_needed defence).
     //
-    // The commitment value and voter pubkey are stored so close_commitment_record
-    // can derive and verify both PDAs without the caller supplying off-chain data,
-    // enabling fully permissionless cleanup.
+    // `init_if_needed` recovers a squatted (pre-funded) PDA by calling
+    // `allocate`+`assign`, leaving all data zeroed. On a genuine second-call
+    // attempt the fields are already set to non-zero/true values, so the
+    // guards below fire before any state is written.
+    require!(
+        ctx.accounts.commitment_record.commitment == [0u8; HASH_SIZE],
+        BallotError::CommitmentAlreadyRegistered
+    );
+    require!(
+        !ctx.accounts.voter_record.is_initialized,
+        BallotError::VoterAlreadyRegistered
+    );
+
+    // Store the commitment and voter pubkey so close_commitment_record can
+    // derive and verify both PDAs permissionlessly without off-chain data.
     ctx.accounts.commitment_record.commitment = commitment;
     ctx.accounts.commitment_record.voter = ctx.accounts.voter.key();
     ctx.accounts.commitment_record.bump = ctx.bumps.commitment_record;
 
-    // voter_record is initialized via `init`. If the same voter pubkey has already
-    // registered for this proposal (with any commitment), `init` fails — preventing
-    // double registration by a colluding admin even when different commitments are used.
+    ctx.accounts.voter_record.is_initialized = true;
     ctx.accounts.voter_record.bump = ctx.bumps.voter_record;
 
     // Insert commitment as a new leaf in the incremental Merkle tree.
@@ -89,10 +97,11 @@ pub struct RegisterVoter<'info> {
     )]
     pub proposal: Account<'info, Proposal>,
 
-    /// Commitment uniqueness guard: a second call with the same commitment bytes
-    /// fails because the PDA already exists, preventing duplicate Merkle insertions.
+    /// Commitment uniqueness guard. `init_if_needed` recovers a pre-funded (squatted)
+    /// PDA transparently; genuine duplicate calls are caught by the handler's
+    /// `CommitmentAlreadyRegistered` guard on `commitment_record.commitment`.
     #[account(
-        init,
+        init_if_needed,
         payer = admin,
         space = CommitmentRecord::LEN,
         seeds = [SEED_COMMITMENT, proposal.key().as_ref(), commitment.as_ref()],
@@ -100,11 +109,11 @@ pub struct RegisterVoter<'info> {
     )]
     pub commitment_record: Account<'info, CommitmentRecord>,
 
-    /// Identity uniqueness guard: a second call with the same voter pubkey fails
-    /// because the PDA already exists, preventing double registration even when
-    /// different commitment values are supplied.
+    /// Identity uniqueness guard. `init_if_needed` recovers a pre-funded (squatted)
+    /// PDA transparently; genuine double-registration attempts are caught by the
+    /// handler's `VoterAlreadyRegistered` guard on `voter_record.is_initialized`.
     #[account(
-        init,
+        init_if_needed,
         payer = admin,
         space = VoterRecord::LEN,
         seeds = [SEED_VOTER, proposal.key().as_ref(), voter.key().as_ref()],
