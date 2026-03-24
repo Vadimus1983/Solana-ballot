@@ -88,9 +88,9 @@ fn init_vote_record(
     record.revealed = false;
     // Sentinel 0xFF is unambiguous for indexers reading .vote without checking .revealed.
     record.vote = VOTE_UNREVEALED;
-    // Voters who want to avoid linking their Solana identity to their nullifier
-    // should use a fresh ephemeral Solana keypair for cast_vote; the ZK proof
-    // is fully independent of the Solana signing key.
+    // Stored verbatim from the caller-supplied `refund_to` parameter.
+    // Pubkey::default() (all zeros) opts into permissionless cleanup —
+    // close_vote_accounts routes the lamports to whoever calls it.
     record.refund_to = *refund_to;
 }
 
@@ -109,6 +109,7 @@ pub fn handler(
     proof: Vec<u8>,
     nullifier: [u8; HASH_SIZE],
     vote_commitment: [u8; HASH_SIZE],
+    refund_to: Pubkey,
 ) -> Result<()> {
     require!(
         proof.len() == PROOF_A_SIZE + PROOF_B_SIZE + PROOF_C_SIZE,
@@ -221,7 +222,7 @@ pub fn handler(
         &proposal.id,
         &vote_commitment,
         &nullifier,
-        ctx.accounts.voter.key,
+        &refund_to,
     );
     ctx.accounts.vote_record.bump = ctx.bumps.vote_record;
 

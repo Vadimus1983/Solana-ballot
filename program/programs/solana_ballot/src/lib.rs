@@ -134,8 +134,9 @@ pub mod solana_ballot {
         proof: Vec<u8>,
         nullifier: [u8; HASH_SIZE],
         vote_commitment: [u8; HASH_SIZE],
+        refund_to: Pubkey,
     ) -> Result<()> {
-        instructions::cast_vote::handler(ctx, proof, nullifier, vote_commitment)
+        instructions::cast_vote::handler(ctx, proof, nullifier, vote_commitment, refund_to)
     }
 
     /// Closes the voting period. No more votes can be cast after this.

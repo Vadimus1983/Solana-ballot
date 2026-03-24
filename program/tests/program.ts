@@ -289,6 +289,7 @@ describe("solana_ballot", () => {
         proof,           // Vec<u8>: proof_a (64) || proof_b (128) || proof_c (64)
         [...nullifier],
         [...voteCommitment],
+        admin.publicKey, // refund_to: rent returned here after finalization
       )
       .accounts({
         voter: admin.publicKey,
@@ -662,6 +663,7 @@ describe("solana_ballot", () => {
           proof,
           [...nullifier],
           [...voteCommitment],
+          admin.publicKey,
         )
         .accounts({
           voter: admin.publicKey,
@@ -705,7 +707,7 @@ describe("solana_ballot", () => {
 
     try {
       await program.methods
-        .castVote(proof, [...zvNullifier], [...Buffer.alloc(32, 0)])  // zero commitment
+        .castVote(proof, [...zvNullifier], [...Buffer.alloc(32, 0)], admin.publicKey)  // zero commitment
         .accounts({
           voter: admin.publicKey, proposal: zvPda, vkAccount: getVkPda(zvPda),
           nullifierRecord: zvNullifierPda, voteRecord: zvVoteRecordPda,
@@ -744,7 +746,7 @@ describe("solana_ballot", () => {
 
     try {
       await program.methods
-        .castVote(proof, [...zeroNullifier], [...voteCommitment])
+        .castVote(proof, [...zeroNullifier], [...voteCommitment], admin.publicKey)
         .accounts({
           voter: admin.publicKey, proposal: znPda, vkAccount: getVkPda(znPda),
           nullifierRecord: znNullifierPda, voteRecord: znVoteRecordPda,
@@ -815,11 +817,10 @@ describe("solana_ballot", () => {
       .rpc();
 
     await program.methods
-      .castVote(proof, [...cmNullifier], [...cmCommitment])
+      .castVote(proof, [...cmNullifier], [...cmCommitment], admin.publicKey)
       .accounts({
         voter: admin.publicKey, proposal: cmPda, vkAccount: getVkPda(cmPda),
         nullifierRecord: cmNullifierPda, voteRecord: cmVoteRecordPda,
-        refundTo: admin.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .rpc();
@@ -873,11 +874,10 @@ describe("solana_ballot", () => {
       .rpc();
 
     await program.methods
-      .castVote(proof, [...wvNullifier], [...wvCommitment])
+      .castVote(proof, [...wvNullifier], [...wvCommitment], admin.publicKey)
       .accounts({
         voter: admin.publicKey, proposal: wvPda, vkAccount: getVkPda(wvPda),
         nullifierRecord: wvNullifierPda, voteRecord: wvVoteRecordPda,
-        refundTo: admin.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .rpc();
@@ -971,11 +971,10 @@ describe("solana_ballot", () => {
       .rpc();
 
     await program.methods
-      .castVote(proof, [...graceNullifier], [...graceCommitment])
+      .castVote(proof, [...graceNullifier], [...graceCommitment], admin.publicKey)
       .accounts({
         voter: admin.publicKey, proposal: gracePda, vkAccount: getVkPda(gracePda),
         nullifierRecord: graceNullifierPda, voteRecord: graceVoteRecordPda,
-        refundTo: admin.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .rpc();
@@ -1040,7 +1039,7 @@ describe("solana_ballot", () => {
       .rpc();
 
     for (const [nul, nulPda, vPda] of [[nul1, nulPda1, voteP1], [nul2, nulPda2, voteP2]] as const) {
-      await program.methods.castVote(proof, [...nul], [...partCommitment])
+      await program.methods.castVote(proof, [...nul], [...partCommitment], admin.publicKey)
         .accounts({ voter: admin.publicKey, proposal: partPda, vkAccount: getVkPda(partPda), nullifierRecord: nulPda, voteRecord: vPda, systemProgram: anchor.web3.SystemProgram.programId })
         .rpc();
     }
