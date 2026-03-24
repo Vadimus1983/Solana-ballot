@@ -11,4 +11,5 @@ pub mod finalize_tally;
 pub mod close_vote_accounts;
 pub mod close_commitment_record;
 pub mod close_proposal;
+pub mod close_vk;
 pub mod expire_proposal;

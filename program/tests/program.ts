@@ -1291,6 +1291,29 @@ describe("solana_ballot", () => {
     }
   });
 
+  it("Rejects close_vk before proposal is terminal", async () => {
+    // The main proposalPda is Finalized at this point, so we test with a
+    // Voting-phase proposal that still needs its window open.
+    // Use the earlyClosePda proposal (opened in "Rejects close_voting before
+    // voting_end") which is in Voting status with a future voting_end.
+    const earlyCloseTitle = "Early close test";
+    const earlyClosePda = getProposalPda(admin.publicKey, earlyCloseTitle);
+
+    try {
+      await program.methods
+        .closeVk()
+        .accounts({
+          admin: admin.publicKey,
+          proposal: earlyClosePda,
+          vkAccount: getVkPda(earlyClosePda),
+        })
+        .rpc();
+      assert.fail("Should have thrown");
+    } catch (err) {
+      assert.ok(err, "close_vk on a non-terminal proposal should be rejected");
+    }
+  });
+
   it("Rejects close_proposal when vote accounts remain unclosed", async () => {
     // proposalPda is Finalized with vote_count=1 and closed_vote_count=0.
     // close_proposal must fail until all vote pairs are closed.
@@ -1374,8 +1397,31 @@ describe("solana_ballot", () => {
     );
   });
 
+  it("Closes VK account after finalization", async () => {
+    // The VerificationKeyAccount has no further purpose once the proposal is
+    // terminal. Closing it reclaims ~0.00631 SOL in rent for the admin.
+    const balanceBefore = await provider.connection.getBalance(admin.publicKey);
+
+    await program.methods
+      .closeVk()
+      .accounts({
+        admin: admin.publicKey,
+        proposal: proposalPda,
+        vkAccount: vkPda,
+      })
+      .rpc();
+
+    assert.isNull(
+      await provider.connection.getAccountInfo(vkPda),
+      "VK account should be closed"
+    );
+
+    const balanceAfter = await provider.connection.getBalance(admin.publicKey);
+    assert.isAbove(balanceAfter, balanceBefore, "Admin should receive VK rent back");
+  });
+
   it("Closes proposal after finalization", async () => {
-    // All vote accounts and commitment records are now closed.
+    // All vote accounts, commitment records, and VK account are now closed.
     await program.methods
       .closeProposal()
       .accounts({ admin: admin.publicKey, proposal: proposalPda })

@@ -43,7 +43,7 @@ Solana-ballot/
 │   │       │   │                       # CommitmentRecord, VoterRecord,
 │   │       │   │                       # PendingCommitmentRecord
 │   │       │   └── vk.rs               # VerificationKeyAccount (Groth16 VK)
-│   │       └── instructions/     # 14 instruction handlers
+│   │       └── instructions/     # 15 instruction handlers
 │   └── tests/program.ts          # Anchor integration tests (~1 500 lines)
 └── client/                       # React + Vite frontend (TypeScript / Tailwind)
     └── src/
@@ -82,7 +82,8 @@ ProgramConfig  [global singleton — 1 per program deploy]
 | 11 | `close_vote_accounts` | Anyone | Cleanup | Closes `NullifierRecord` + `VoteRecord`; rent to `refund_to` address |
 | 12 | `close_commitment_record` | Anyone | Cleanup | Closes `CommitmentRecord` + `VoterRecord`; terminal status required |
 | 13 | `close_proposal` | Admin | Cleanup | Closes `Proposal`; requires all vote/commitment accounts closed first |
-| 14 | `expire_proposal` | Anyone | Cleanup | Advances stuck `Registration` proposals to `Expired` after `voting_end` |
+| 14 | `close_vk` | Admin | Cleanup | Closes `VerificationKeyAccount`; returns ~0.00631 SOL rent to admin; terminal status required |
+| 15 | `expire_proposal` | Anyone | Cleanup | Advances stuck `Registration` proposals to `Expired` after `voting_end` |
 
 ### ZK Circuit (combined Groth16, BN254)
 
@@ -233,7 +234,7 @@ Costs are Solana **rent-exempt deposits** — locked while accounts are live, re
 |---|---|---|---|---|---|
 | `ProgramConfig` | 41 B | **~0.00118 SOL** | Authority | ✅ Program lifetime | — |
 | `Proposal` | 1 234 B | **~0.00948 SOL** | Admin | ✅ Yes | `close_proposal` → admin |
-| `VerificationKeyAccount` | 778 B | **~0.00631 SOL** | Authority | ⚠️ No close instruction | See Known Issues §4 |
+| `VerificationKeyAccount` | 778 B | **~0.00631 SOL** | Authority | ✅ Yes | `close_vk` → admin (terminal status required) |
 | `PendingCommitmentRecord` | 41 B | **~0.00118 SOL** | Voter | ✅ Yes (quickly) | `register_voter` → voter |
 | `CommitmentRecord` | 73 B | **~0.00140 SOL** | Admin | ✅ Yes | `close_commitment_record` → admin |
 | `VoterRecord` | 10 B | **~0.00096 SOL** | Admin | ✅ Yes | `close_commitment_record` → admin |
@@ -249,7 +250,7 @@ Assumes full participation: every registered voter casts a vote and reveals it.
 |---|---|---|---|---|
 | **Fixed per proposal (admin/authority) — refundable** | | | | |
 | `Proposal` account | — | 0.00948 SOL | 0.00948 SOL | 0.00948 SOL |
-| `VerificationKeyAccount` (⚠️) | — | 0.00631 SOL | 0.00631 SOL | 0.00631 SOL |
+| `VerificationKeyAccount` | — | 0.00631 SOL | 0.00631 SOL | 0.00631 SOL |
 | **Per voter — admin pays — fully refundable** | | | | |
 | `CommitmentRecord` + `VoterRecord` | 0.00236 SOL | 0.02360 SOL | 0.23600 SOL | ~2 474.6 SOL |
 | **Per voter — voter pays — fully refundable** | | | | |
@@ -281,39 +282,35 @@ Assumes full participation: every registered voter casts a vote and reveals it.
 
 `constants.rs` sets `pub const PROGRAM_AUTHORITY: [u8; 32] = [0u8; 32];`. A compile-time `const`-assert blocks production builds with this value, but the constant **must be updated** to the deployer's 32-byte public key before any mainnet deployment. Leaving it all-zeros opens a front-running window between program deploy and `initialize`.
 
-### 3. No `close_vk` Instruction
-
-`VerificationKeyAccount` (~0.00631 SOL per proposal) has no corresponding close instruction. Its rent deposit cannot be recovered after the proposal reaches a terminal state. A `close_vk` instruction gated on `proposal.status.is_terminal()` would recover this deposit.
-
-### 4. `cast_vote` Compute Budget Not Requested by the Program
+### 3. `cast_vote` Compute Budget Not Requested by the Program
 
 The program does not prepend a `SetComputeUnitLimit` instruction. Callers who omit it will hit the default 200 000 CU budget and receive a `ComputationalBudgetExceeded` error during Groth16 pairing verification (~1.4 M CU required). Client-side tooling must include this instruction explicitly.
 
-### 5. `register_voter` Is Not Batched
+### 4. `register_voter` Is Not Batched
 
 The admin must submit one transaction per voter during registration. For hundreds or thousands of voters this creates a serial bottleneck. A batched variant accepting multiple `(voter, commitment)` pairs per call would significantly reduce wall-clock time and admin transaction fees.
 
-### 6. No Voter Notification Mechanism
+### 5. No Voter Notification Mechanism
 
 Voters must poll the `Proposal` account (or subscribe via WebSocket account-change notifications) to detect the transition to `Voting` status. There is no event indexed by voter identity or push-notification infrastructure.
 
-### 7. Voters Who Miss the Reveal Window Are Silently Excluded
+### 6. Voters Who Miss the Reveal Window Are Silently Excluded
 
 A voter who casts a vote but does not call `reveal_vote` within the 24-hour grace period after `voting_end` is permanently excluded from the tally. The on-chain discrepancy between `vote_count` and `yes_count + no_count` is the only signal. No warning or retry mechanism exists.
 
-### 8. Binary (Yes/No) Votes Only
+### 7. Binary (Yes/No) Votes Only
 
 The circuit enforces `vote ∈ {0, 1}`. Multi-choice, ranked-choice, or token-weighted voting require circuit changes and a new trusted-setup ceremony.
 
-### 9. Merkle Root Is Snapshot-Based at Proof Time
+### 8. Merkle Root Is Snapshot-Based at Proof Time
 
 The `merkle_root` in the `Proposal` account reflects the state after the last `register_voter` call. A voter who generates their Groth16 proof before the final batch of registrations is processed will hold a stale root and their proof will fail on-chain. Voters must fetch the root immediately before generating their proof.
 
-### 10. VK Is Immutable After `store_vk`
+### 9. VK Is Immutable After `store_vk`
 
 `store_vk` is a one-write, no-replace instruction. If the wrong VK is uploaded (e.g., a test key, or a key for the wrong circuit), the proposal is unrecoverable — no vote can ever pass verification. The only remedy is to expire the proposal and start a new one.
 
-### 11. Migration Script Is a Stub
+### 10. Migration Script Is a Stub
 
 `program/migrations/deploy.ts` contains no deployment logic. Production deployment steps (initialize, create_proposal, store_vk) must be performed manually via CLI or a custom script.
 

@@ -7,6 +7,6 @@ test:
 # set to a real pubkey in programs/solana_ballot/src/constants.rs before this
 # will succeed.
 build:
-	anchor build
+	clear & anchor build
 
 .PHONY: test build

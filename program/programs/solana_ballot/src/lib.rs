@@ -11,7 +11,7 @@ use instructions::{
     initialize::*, create_proposal::*, register_commitment::*, register_voter::*,
     open_voting::*, store_vk::*, cast_vote::*, close_voting::*, reveal_vote::*,
     finalize_tally::*, close_vote_accounts::*, close_commitment_record::*,
-    close_proposal::*, expire_proposal::*,
+    close_proposal::*, close_vk::*, expire_proposal::*,
 };
 
 declare_id!("2h52sCAKhKtBFdyTfa3XamcWXkZB6M3D7XknNNfkQivZ");
@@ -210,6 +210,14 @@ pub mod solana_ballot {
     /// `close_vote_accounts` and `close_commitment_record`.
     pub fn close_proposal(ctx: Context<CloseProposal>) -> Result<()> {
         instructions::close_proposal::handler(ctx)
+    }
+
+    /// Closes the per-proposal VerificationKeyAccount and returns its rent to the admin.
+    ///
+    /// The VK account (~0.00631 SOL) is no longer needed once the proposal reaches
+    /// a terminal state (Finalized or Expired). Callable only by the proposal admin.
+    pub fn close_vk(ctx: Context<CloseVk>) -> Result<()> {
+        instructions::close_vk::handler(ctx)
     }
 
     /// Transitions a Registration proposal to Expired after its voting window
