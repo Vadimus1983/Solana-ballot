@@ -134,6 +134,51 @@ describe("solana_ballot", () => {
     return pda;
   }
 
+  function getPendingCommitmentPda(proposal: anchor.web3.PublicKey, voter: anchor.web3.PublicKey) {
+    const [pda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("pending_commitment"), proposal.toBuffer(), voter.toBuffer()],
+      program.programId
+    );
+    return pda;
+  }
+
+  /**
+   * Two-phase voter registration helper.
+   * Phase 1: voter calls registerCommitment (binds commitment to their identity).
+   * Phase 2: admin calls registerVoter (reads from pending PDA, inserts into Merkle tree).
+   */
+  async function registerVoterTwoPhase(
+    proposal: anchor.web3.PublicKey,
+    commitment: Buffer,
+    voterPubkey: anchor.web3.PublicKey,
+    voterKeypair?: anchor.web3.Keypair,
+  ): Promise<void> {
+    const pendingPda = getPendingCommitmentPda(proposal, voterPubkey);
+    const regCommitCall = program.methods
+      .registerCommitment([...commitment])
+      .accounts({
+        voter: voterPubkey,
+        proposal,
+        pendingCommitment: pendingPda,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      });
+    if (voterKeypair) regCommitCall.signers([voterKeypair]);
+    await regCommitCall.rpc();
+
+    await program.methods
+      .registerVoter()
+      .accounts({
+        admin: admin.publicKey,
+        voter: voterPubkey,
+        proposal,
+        pendingCommitment: pendingPda,
+        commitmentRecord: getCommitmentRecordPda(proposal, commitment),
+        voterRecord: getVoterRecordPda(proposal, voterPubkey),
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+  }
+
   // ── Happy path ────────────────────────────────────────────────────────────
 
   it("Initializes the program", async () => {
@@ -177,17 +222,7 @@ describe("solana_ballot", () => {
   });
 
   it("Registers a voter", async () => {
-    await program.methods
-      .registerVoter([...commitment])
-      .accounts({
-        admin: admin.publicKey,
-        voter: admin.publicKey,
-        proposal: proposalPda,
-        commitmentRecord: getCommitmentRecordPda(proposalPda, commitment),
-        voterRecord: getVoterRecordPda(proposalPda, admin.publicKey),
-        systemProgram: anchor.web3.SystemProgram.programId,
-      })
-      .rpc();
+    await registerVoterTwoPhase(proposalPda, commitment, admin.publicKey);
 
     const proposal = await program.account.proposal.fetch(proposalPda);
     assert.equal(proposal.voterCount.toNumber(), 1);
@@ -458,14 +493,29 @@ describe("solana_ballot", () => {
     );
     await provider.connection.confirmTransaction(sig);
 
+    // Phase 1: attacker registers their commitment as voter (this succeeds — anyone can register a commitment).
+    const attackCommitment = Buffer.alloc(32, 2);
+    await program.methods
+      .registerCommitment([...attackCommitment])
+      .accounts({
+        voter: attacker.publicKey,
+        proposal: altPda,
+        pendingCommitment: getPendingCommitmentPda(altPda, attacker.publicKey),
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .signers([attacker])
+      .rpc();
+
+    // Phase 2: attacker tries to call registerVoter as admin — must fail Unauthorized.
     try {
       await program.methods
-        .registerVoter([...Buffer.alloc(32, 2)])
+        .registerVoter()
         .accounts({
           admin: attacker.publicKey,
           voter: attacker.publicKey,
           proposal: altPda,
-          commitmentRecord: getCommitmentRecordPda(altPda, Buffer.alloc(32, 2)),
+          pendingCommitment: getPendingCommitmentPda(altPda, attacker.publicKey),
+          commitmentRecord: getCommitmentRecordPda(altPda, attackCommitment),
           voterRecord: getVoterRecordPda(altPda, attacker.publicKey),
           systemProgram: anchor.web3.SystemProgram.programId,
         })
@@ -477,7 +527,7 @@ describe("solana_ballot", () => {
     }
   });
 
-  it("Rejects zero commitment in register_voter", async () => {
+  it("Rejects zero commitment in register_commitment", async () => {
     const zeroCommitTitle = "Zero commitment test";
     const zeroCommitPda = getProposalPda(admin.publicKey, zeroCommitTitle);
     const zeroCommit = Buffer.alloc(32, 0);
@@ -489,8 +539,8 @@ describe("solana_ballot", () => {
       .rpc();
 
     try {
-      await program.methods.registerVoter([...zeroCommit])
-        .accounts({ admin: admin.publicKey, voter: admin.publicKey, proposal: zeroCommitPda, commitmentRecord: getCommitmentRecordPda(zeroCommitPda, zeroCommit), voterRecord: getVoterRecordPda(zeroCommitPda, admin.publicKey), systemProgram: anchor.web3.SystemProgram.programId })
+      await program.methods.registerCommitment([...zeroCommit])
+        .accounts({ voter: admin.publicKey, proposal: zeroCommitPda, pendingCommitment: getPendingCommitmentPda(zeroCommitPda, admin.publicKey), systemProgram: anchor.web3.SystemProgram.programId })
         .rpc();
       assert.fail("Should have thrown");
     } catch (err) {
@@ -498,7 +548,7 @@ describe("solana_ballot", () => {
     }
   });
 
-  it("Rejects out-of-range commitment in register_voter", async () => {
+  it("Rejects out-of-range commitment in register_commitment", async () => {
     // A commitment with first byte 0xff is > BN254 prime (first byte 0x30),
     // so it is not a valid field element and must be rejected.
     const rangeTitle = "Out-of-range commitment test";
@@ -512,8 +562,8 @@ describe("solana_ballot", () => {
       .rpc();
 
     try {
-      await program.methods.registerVoter([...outOfRange])
-        .accounts({ admin: admin.publicKey, voter: admin.publicKey, proposal: rangePda, commitmentRecord: getCommitmentRecordPda(rangePda, outOfRange), voterRecord: getVoterRecordPda(rangePda, admin.publicKey), systemProgram: anchor.web3.SystemProgram.programId })
+      await program.methods.registerCommitment([...outOfRange])
+        .accounts({ voter: admin.publicKey, proposal: rangePda, pendingCommitment: getPendingCommitmentPda(rangePda, admin.publicKey), systemProgram: anchor.web3.SystemProgram.programId })
         .rpc();
       assert.fail("Should have thrown");
     } catch (err) {
@@ -540,16 +590,20 @@ describe("solana_ballot", () => {
       .rpc();
 
     // First registration — must succeed.
-    await program.methods
-      .registerVoter([...dupCommitment])
-      .accounts({ admin: admin.publicKey, voter: admin.publicKey, proposal: dupPda, commitmentRecord: dupCommitmentRecordPda, voterRecord: getVoterRecordPda(dupPda, admin.publicKey), systemProgram: anchor.web3.SystemProgram.programId })
-      .rpc();
+    await registerVoterTwoPhase(dupPda, dupCommitment, admin.publicKey);
 
     // Second registration with identical commitment — must fail.
+    // Phase 1 (registerCommitment) succeeds because PendingCommitmentRecord was closed.
+    // Phase 2 (registerVoter) fails because CommitmentRecord already exists.
+    const dupPendingPda = getPendingCommitmentPda(dupPda, admin.publicKey);
+    await program.methods
+      .registerCommitment([...dupCommitment])
+      .accounts({ voter: admin.publicKey, proposal: dupPda, pendingCommitment: dupPendingPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
     try {
       await program.methods
-        .registerVoter([...dupCommitment])
-        .accounts({ admin: admin.publicKey, voter: admin.publicKey, proposal: dupPda, commitmentRecord: dupCommitmentRecordPda, voterRecord: getVoterRecordPda(dupPda, admin.publicKey), systemProgram: anchor.web3.SystemProgram.programId })
+        .registerVoter()
+        .accounts({ admin: admin.publicKey, voter: admin.publicKey, proposal: dupPda, pendingCommitment: dupPendingPda, commitmentRecord: dupCommitmentRecordPda, voterRecord: getVoterRecordPda(dupPda, admin.publicKey), systemProgram: anchor.web3.SystemProgram.programId })
         .rpc();
       assert.fail("Should have thrown");
     } catch (err) {
@@ -567,23 +621,30 @@ describe("solana_ballot", () => {
     const commitA = Buffer.alloc(32, 0x03);
     const commitB = Buffer.alloc(32, 0x04);
 
+    // dblVoter needs SOL to pay for the PendingCommitmentRecord in registerCommitment.
+    const dblSig = await provider.connection.requestAirdrop(dblVoter.publicKey, anchor.web3.LAMPORTS_PER_SOL);
+    await provider.connection.confirmTransaction(dblSig);
+
     await program.methods
       .createProposal(dblTitle, description, new anchor.BN(votingStart), new anchor.BN(futureEnd))
       .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: dblPda, systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
-    await program.methods
-      .registerVoter([...commitA])
-      .accounts({ admin: admin.publicKey, voter: dblVoter.publicKey, proposal: dblPda, commitmentRecord: getCommitmentRecordPda(dblPda, commitA), voterRecord: getVoterRecordPda(dblPda, dblVoter.publicKey), systemProgram: anchor.web3.SystemProgram.programId })
-      .signers([dblVoter])
-      .rpc();
+    await registerVoterTwoPhase(dblPda, commitA, dblVoter.publicKey, dblVoter);
 
     // Same voter, different commitment — VoterRecord already exists; must fail.
+    // Phase 1 succeeds (fresh PendingCommitmentRecord after previous was closed).
+    // Phase 2 fails because VoterRecord already exists (is_initialized = true).
+    const dblPendingPda = getPendingCommitmentPda(dblPda, dblVoter.publicKey);
+    await program.methods
+      .registerCommitment([...commitB])
+      .accounts({ voter: dblVoter.publicKey, proposal: dblPda, pendingCommitment: dblPendingPda, systemProgram: anchor.web3.SystemProgram.programId })
+      .signers([dblVoter])
+      .rpc();
     try {
       await program.methods
-        .registerVoter([...commitB])
-        .accounts({ admin: admin.publicKey, voter: dblVoter.publicKey, proposal: dblPda, commitmentRecord: getCommitmentRecordPda(dblPda, commitB), voterRecord: getVoterRecordPda(dblPda, dblVoter.publicKey), systemProgram: anchor.web3.SystemProgram.programId })
-        .signers([dblVoter])
+        .registerVoter()
+        .accounts({ admin: admin.publicKey, voter: dblVoter.publicKey, proposal: dblPda, pendingCommitment: dblPendingPda, commitmentRecord: getCommitmentRecordPda(dblPda, commitB), voterRecord: getVoterRecordPda(dblPda, dblVoter.publicKey), systemProgram: anchor.web3.SystemProgram.programId })
         .rpc();
       assert.fail("Should have thrown");
     } catch (err) {
@@ -637,9 +698,7 @@ describe("solana_ballot", () => {
       .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: expiredPda, systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
-    await program.methods.registerVoter([...Buffer.alloc(32, 0x0a)])
-      .accounts({ admin: admin.publicKey, voter: admin.publicKey, proposal: expiredPda, commitmentRecord: getCommitmentRecordPda(expiredPda, Buffer.alloc(32, 0x0a)), voterRecord: getVoterRecordPda(expiredPda, admin.publicKey), systemProgram: anchor.web3.SystemProgram.programId })
-      .rpc();
+    await registerVoterTwoPhase(expiredPda, Buffer.alloc(32, 0x0a), admin.publicKey);
 
     await storeVkForProposal(expiredPda);
 
@@ -696,9 +755,7 @@ describe("solana_ballot", () => {
       .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: zvPda, systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
-    await program.methods.registerVoter([...Buffer.alloc(32, 0x0b)])
-      .accounts({ admin: admin.publicKey, voter: admin.publicKey, proposal: zvPda, commitmentRecord: getCommitmentRecordPda(zvPda, Buffer.alloc(32, 0x0b)), voterRecord: getVoterRecordPda(zvPda, admin.publicKey), systemProgram: anchor.web3.SystemProgram.programId })
-      .rpc();
+    await registerVoterTwoPhase(zvPda, Buffer.alloc(32, 0x0b), admin.publicKey);
 
     await storeVkForProposal(zvPda);
     await program.methods.openVoting()
@@ -735,9 +792,7 @@ describe("solana_ballot", () => {
       .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: znPda, systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
-    await program.methods.registerVoter([...Buffer.alloc(32, 0x0c)])
-      .accounts({ admin: admin.publicKey, voter: admin.publicKey, proposal: znPda, commitmentRecord: getCommitmentRecordPda(znPda, Buffer.alloc(32, 0x0c)), voterRecord: getVoterRecordPda(znPda, admin.publicKey), systemProgram: anchor.web3.SystemProgram.programId })
-      .rpc();
+    await registerVoterTwoPhase(znPda, Buffer.alloc(32, 0x0c), admin.publicKey);
 
     await storeVkForProposal(znPda);
     await program.methods.openVoting()
@@ -769,10 +824,7 @@ describe("solana_ballot", () => {
       .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: earlyClosePda, systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
-    await program.methods
-      .registerVoter([...commitment])
-      .accounts({ admin: admin.publicKey, voter: admin.publicKey, proposal: earlyClosePda, commitmentRecord: getCommitmentRecordPda(earlyClosePda, commitment), voterRecord: getVoterRecordPda(earlyClosePda, admin.publicKey), systemProgram: anchor.web3.SystemProgram.programId })
-      .rpc();
+    await registerVoterTwoPhase(earlyClosePda, commitment, admin.publicKey);
 
     await storeVkForProposal(earlyClosePda);
     await program.methods
@@ -806,10 +858,7 @@ describe("solana_ballot", () => {
       .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: cmPda, systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
-    await program.methods
-      .registerVoter([...commitment])
-      .accounts({ admin: admin.publicKey, voter: admin.publicKey, proposal: cmPda, commitmentRecord: getCommitmentRecordPda(cmPda, commitment), voterRecord: getVoterRecordPda(cmPda, admin.publicKey), systemProgram: anchor.web3.SystemProgram.programId })
-      .rpc();
+    await registerVoterTwoPhase(cmPda, commitment, admin.publicKey);
 
     await storeVkForProposal(cmPda);
     await program.methods.openVoting()
@@ -863,10 +912,7 @@ describe("solana_ballot", () => {
       .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: wvPda, systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
-    await program.methods
-      .registerVoter([...commitment])
-      .accounts({ admin: admin.publicKey, voter: admin.publicKey, proposal: wvPda, commitmentRecord: getCommitmentRecordPda(wvPda, commitment), voterRecord: getVoterRecordPda(wvPda, admin.publicKey), systemProgram: anchor.web3.SystemProgram.programId })
-      .rpc();
+    await registerVoterTwoPhase(wvPda, commitment, admin.publicKey);
 
     await storeVkForProposal(wvPda);
     await program.methods.openVoting()
@@ -956,14 +1002,11 @@ describe("solana_ballot", () => {
     const graceCommitment = computeVoteCommitment(1, Buffer.alloc(32, 0));
 
     await program.methods
-      .createProposal(graceTitle, description, new anchor.BN(now4 - 1), new anchor.BN(now4 + 2))
+      .createProposal(graceTitle, description, new anchor.BN(now4 - 1), new anchor.BN(now4 + 8))
       .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: gracePda, systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
-    await program.methods
-      .registerVoter([...Buffer.alloc(32, 9)])
-      .accounts({ admin: admin.publicKey, voter: admin.publicKey, proposal: gracePda, commitmentRecord: getCommitmentRecordPda(gracePda, Buffer.alloc(32, 9)), voterRecord: getVoterRecordPda(gracePda, admin.publicKey), systemProgram: anchor.web3.SystemProgram.programId })
-      .rpc();
+    await registerVoterTwoPhase(gracePda, Buffer.alloc(32, 9), admin.publicKey);
 
     await storeVkForProposal(gracePda);
     await program.methods.openVoting()
@@ -979,8 +1022,8 @@ describe("solana_ballot", () => {
       })
       .rpc();
 
-    // Wait for voting_end, then close.
-    await new Promise(r => setTimeout(r, 3000));
+    // Wait for voting_end to pass, then close.
+    await new Promise(r => setTimeout(r, 9000));
     await program.methods.closeVoting()
       .accounts({ closer: admin.publicKey, proposal: gracePda })
       .rpc();
@@ -1022,16 +1065,15 @@ describe("solana_ballot", () => {
       .rpc();
 
     // Two distinct voters — unique keypairs so the VoterRecord guard doesn't block the second.
+    // Both need SOL to pay for their PendingCommitmentRecord in registerCommitment.
     const partVoter1 = anchor.web3.Keypair.generate();
     const partVoter2 = anchor.web3.Keypair.generate();
-    await program.methods.registerVoter([...Buffer.alloc(32, 0x05)])
-      .accounts({ admin: admin.publicKey, voter: partVoter1.publicKey, proposal: partPda, commitmentRecord: getCommitmentRecordPda(partPda, Buffer.alloc(32, 0x05)), voterRecord: getVoterRecordPda(partPda, partVoter1.publicKey), systemProgram: anchor.web3.SystemProgram.programId })
-      .signers([partVoter1])
-      .rpc();
-    await program.methods.registerVoter([...Buffer.alloc(32, 0x06)])
-      .accounts({ admin: admin.publicKey, voter: partVoter2.publicKey, proposal: partPda, commitmentRecord: getCommitmentRecordPda(partPda, Buffer.alloc(32, 0x06)), voterRecord: getVoterRecordPda(partPda, partVoter2.publicKey), systemProgram: anchor.web3.SystemProgram.programId })
-      .signers([partVoter2])
-      .rpc();
+    for (const kp of [partVoter1, partVoter2]) {
+      const s = await provider.connection.requestAirdrop(kp.publicKey, anchor.web3.LAMPORTS_PER_SOL);
+      await provider.connection.confirmTransaction(s);
+    }
+    await registerVoterTwoPhase(partPda, Buffer.alloc(32, 0x05), partVoter1.publicKey, partVoter1);
+    await registerVoterTwoPhase(partPda, Buffer.alloc(32, 0x06), partVoter2.publicKey, partVoter2);
 
     await storeVkForProposal(partPda);
     await program.methods.openVoting()
@@ -1132,10 +1174,7 @@ describe("solana_ballot", () => {
       .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: wrongVkPda, systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
-    await program.methods
-      .registerVoter([...Buffer.alloc(32, 7)])
-      .accounts({ admin: admin.publicKey, voter: admin.publicKey, proposal: wrongVkPda, commitmentRecord: getCommitmentRecordPda(wrongVkPda, Buffer.alloc(32, 7)), voterRecord: getVoterRecordPda(wrongVkPda, admin.publicKey), systemProgram: anchor.web3.SystemProgram.programId })
-      .rpc();
+    await registerVoterTwoPhase(wrongVkPda, Buffer.alloc(32, 7), admin.publicKey);
 
     try {
       await program.methods
@@ -1166,10 +1205,7 @@ describe("solana_ballot", () => {
       .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: initVkPda, systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
-    await program.methods
-      .registerVoter([...Buffer.alloc(32, 8)])
-      .accounts({ admin: admin.publicKey, voter: admin.publicKey, proposal: initVkPda, commitmentRecord: getCommitmentRecordPda(initVkPda, Buffer.alloc(32, 8)), voterRecord: getVoterRecordPda(initVkPda, admin.publicKey), systemProgram: anchor.web3.SystemProgram.programId })
-      .rpc();
+    await registerVoterTwoPhase(initVkPda, Buffer.alloc(32, 8), admin.publicKey);
 
     await storeVkForProposal(initVkPda);
     await program.methods
@@ -1367,10 +1403,7 @@ describe("solana_ballot", () => {
       .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: expVotPda, systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
-    await program.methods
-      .registerVoter([...Buffer.alloc(32, 0x09)])
-      .accounts({ admin: admin.publicKey, voter: admin.publicKey, proposal: expVotPda, commitmentRecord: getCommitmentRecordPda(expVotPda, Buffer.alloc(32, 0x09)), voterRecord: getVoterRecordPda(expVotPda, admin.publicKey), systemProgram: anchor.web3.SystemProgram.programId })
-      .rpc();
+    await registerVoterTwoPhase(expVotPda, Buffer.alloc(32, 0x09), admin.publicKey);
 
     await storeVkForProposal(expVotPda);
     await program.methods
@@ -1404,10 +1437,7 @@ describe("solana_ballot", () => {
       .accounts({ admin: admin.publicKey, programConfig: programConfigPda, proposal: stuckPda, systemProgram: anchor.web3.SystemProgram.programId })
       .rpc();
 
-    await program.methods
-      .registerVoter([...stuckCommitment])
-      .accounts({ admin: admin.publicKey, voter: admin.publicKey, proposal: stuckPda, commitmentRecord: stuckCommitmentPda, voterRecord: getVoterRecordPda(stuckPda, admin.publicKey), systemProgram: anchor.web3.SystemProgram.programId })
-      .rpc();
+    await registerVoterTwoPhase(stuckPda, stuckCommitment, admin.publicKey);
 
     // Wait for voting_end to pass without calling open_voting.
     await new Promise(r => setTimeout(r, 10000));

@@ -8,10 +8,10 @@ pub mod instructions;
 pub mod state;
 
 use instructions::{
-    initialize::*, create_proposal::*, register_voter::*, open_voting::*,
-    store_vk::*, cast_vote::*, close_voting::*, reveal_vote::*, finalize_tally::*,
-    close_vote_accounts::*, close_commitment_record::*, close_proposal::*,
-    expire_proposal::*,
+    initialize::*, create_proposal::*, register_commitment::*, register_voter::*,
+    open_voting::*, store_vk::*, cast_vote::*, close_voting::*, reveal_vote::*,
+    finalize_tally::*, close_vote_accounts::*, close_commitment_record::*,
+    close_proposal::*, expire_proposal::*,
 };
 
 declare_id!("2h52sCAKhKtBFdyTfa3XamcWXkZB6M3D7XknNNfkQivZ");
@@ -44,25 +44,37 @@ pub mod solana_ballot {
         instructions::create_proposal::handler(ctx, title, description, voting_start, voting_end)
     }
 
-    /// Registers an eligible voter by adding their commitment to the Merkle tree.
-    /// Must be called by the admin during the Registration phase.
-    /// The commitment is `Poseidon(secret_key, randomness)` computed off-chain by the voter.
-    /// Voters must register before voting opens — they cannot register retroactively.
+    /// Step 1 of the two-phase voter registration protocol.
     ///
-    /// Both the admin and the voter must sign. The voter co-signature binds one
-    /// Solana identity to exactly one commitment per proposal: a `VoterRecord` PDA
-    /// seeded by the voter's pubkey is initialized atomically, so any attempt to
-    /// register the same Solana keypair twice — even with a different commitment —
-    /// is rejected on-chain.
+    /// The voter calls this instruction (signed by their own wallet) to deposit
+    /// their Poseidon commitment `C = Poseidon(secret_key, randomness)` into a
+    /// `PendingCommitmentRecord` PDA seeded by `(proposal, voter_pubkey)`.
+    ///
+    /// Because the PDA address is derived from the voter's public key, the admin
+    /// cannot substitute a different commitment in step 2 (`register_voter`):
+    /// they must pass exactly this PDA, which holds exactly what the voter signed.
     ///
     /// # Parameters
     /// - `commitment` — 32-byte Poseidon hash of the voter's secret key and randomness.
-    ///                  This is the voter's leaf in the eligibility Merkle tree.
-    pub fn register_voter(
-        ctx: Context<RegisterVoter>,
+    pub fn register_commitment(
+        ctx: Context<RegisterCommitment>,
         commitment: [u8; HASH_SIZE],
     ) -> Result<()> {
-        instructions::register_voter::handler(ctx, commitment)
+        instructions::register_commitment::handler(ctx, commitment)
+    }
+
+    /// Step 2 of the two-phase voter registration protocol.
+    ///
+    /// The admin calls this instruction to insert the voter's commitment (read
+    /// from `PendingCommitmentRecord`) into the eligibility Merkle tree.
+    /// The `PendingCommitmentRecord` is closed atomically, returning rent to the voter.
+    ///
+    /// No `commitment` parameter — the commitment is read from the account the voter
+    /// created in `register_commitment`. This prevents admin substitution.
+    ///
+    /// Voters must register before voting opens — they cannot register retroactively.
+    pub fn register_voter(ctx: Context<RegisterVoter>) -> Result<()> {
+        instructions::register_voter::handler(ctx)
     }
 
     /// Stores the Groth16 verifying key on-chain for a specific proposal.

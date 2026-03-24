@@ -48,6 +48,7 @@ pub const SEED_COMMITMENT: &[u8] = b"commitment";
 pub const SEED_VOTER: &[u8] = b"voter";
 pub const SEED_VK: &[u8] = b"vk";
 pub const SEED_CONFIG: &[u8] = b"config";
+pub const SEED_PENDING_COMMITMENT: &[u8] = b"pending_commitment";
 
 /// Minimum time after voting_end before finalize_tally can run.
 /// Gives voters 24 hours to reveal after voting closes.

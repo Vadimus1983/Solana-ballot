@@ -1,5 +1,6 @@
 pub mod initialize;
 pub mod create_proposal;
+pub mod register_commitment;
 pub mod register_voter;
 pub mod open_voting;
 pub mod store_vk;

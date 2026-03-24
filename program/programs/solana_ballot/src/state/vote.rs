@@ -78,6 +78,28 @@ impl VoterRecord {
     pub const LEN: usize = ANCHOR_DISCRIMINATOR + 1 + 1; // is_initialized + bump
 }
 
+/// Temporary holding account created by the voter to bind their commitment to
+/// their Solana identity before the admin inserts it into the Merkle tree.
+///
+/// Seeded by `(proposal, voter_pubkey)` so:
+///   - One slot per (proposal, voter) — a voter cannot queue two different
+///     commitments simultaneously.
+///   - The voter's signing key is cryptographically embedded in the PDA
+///     derivation, making it impossible for the admin to substitute a different
+///     commitment without invalidating the PDA address.
+///
+/// Closed by `register_voter` (lamports returned to the voter), which atomically
+/// reads the commitment and inserts it into the Merkle tree.
+#[account]
+pub struct PendingCommitmentRecord {
+    pub commitment: [u8; HASH_SIZE],
+    pub bump: u8,
+}
+
+impl PendingCommitmentRecord {
+    pub const LEN: usize = ANCHOR_DISCRIMINATOR + HASH_SIZE + 1;
+}
+
 /// One account per nullifier — its existence means the nullifier is spent
 #[account]
 pub struct NullifierRecord {

@@ -1,11 +1,11 @@
 use anchor_lang::prelude::*;
 use crate::state::proposal::{Proposal, ProposalStatus};
-use crate::state::vote::{CommitmentRecord, VoterRecord};
+use crate::state::vote::{CommitmentRecord, VoterRecord, PendingCommitmentRecord};
 use crate::error::BallotError;
 use crate::constants::*;
 use crate::merkle::insert_leaf;
 
-pub fn handler(ctx: Context<RegisterVoter>, commitment: [u8; HASH_SIZE]) -> Result<()> {
+pub fn handler(ctx: Context<RegisterVoter>) -> Result<()> {
     let proposal = &mut ctx.accounts.proposal;
 
     require!(
@@ -13,24 +13,13 @@ pub fn handler(ctx: Context<RegisterVoter>, commitment: [u8; HASH_SIZE]) -> Resu
         BallotError::NotInRegistration
     );
 
-    // Reject zero and out-of-range commitments.
-    // - Zero wastes a Merkle leaf: no one can produce Poseidon(secret,randomness)=0
-    //   and the ZK circuit would reject the proof anyway.
-    // - Values >= BN254_PRIME are not valid field elements and would cause the
-    //   ZK circuit to reject any proof for that slot.
-    // Both checks use big-endian byte comparison (array PartialOrd is lexicographic,
-    // which equals numeric order for big-endian byte arrays).
-    require!(
-        commitment != [0u8; HASH_SIZE] && commitment < BN254_PRIME,
-        BallotError::InvalidCommitment
-    );
+    // Read the commitment the voter deposited in register_commitment.
+    // The PendingCommitmentRecord is closed by the `close = voter` constraint
+    // after this instruction completes, so the commitment is read here before
+    // the account is reclaimed.
+    let commitment = ctx.accounts.pending_commitment.commitment;
 
     // Guard against pre-funded PDA squatting (init_if_needed defence).
-    //
-    // `init_if_needed` recovers a squatted (pre-funded) PDA by calling
-    // `allocate`+`assign`, leaving all data zeroed. On a genuine second-call
-    // attempt the fields are already set to non-zero/true values, so the
-    // guards below fire before any state is written.
     require!(
         ctx.accounts.commitment_record.commitment == [0u8; HASH_SIZE],
         BallotError::CommitmentAlreadyRegistered
@@ -40,8 +29,6 @@ pub fn handler(ctx: Context<RegisterVoter>, commitment: [u8; HASH_SIZE]) -> Resu
         BallotError::VoterAlreadyRegistered
     );
 
-    // Store the commitment and voter pubkey so close_commitment_record can
-    // derive and verify both PDAs permissionlessly without off-chain data.
     ctx.accounts.commitment_record.commitment = commitment;
     ctx.accounts.commitment_record.voter = ctx.accounts.voter.key();
     ctx.accounts.commitment_record.bump = ctx.bumps.commitment_record;
@@ -51,8 +38,7 @@ pub fn handler(ctx: Context<RegisterVoter>, commitment: [u8; HASH_SIZE]) -> Resu
 
     // Insert commitment as a new leaf in the incremental Merkle tree.
     // voter_count before incrementing is the index of the new leaf.
-    // Returns the new Merkle root which is stored on-chain and verified in cast_vote.
-    let leaf_index = proposal.voter_count; // copy before mutable borrow
+    let leaf_index = proposal.voter_count;
     let new_root = insert_leaf(
         &mut proposal.merkle_frontier,
         commitment,
@@ -64,7 +50,7 @@ pub fn handler(ctx: Context<RegisterVoter>, commitment: [u8; HASH_SIZE]) -> Resu
     emit!(VoterRegistered {
         proposal_id: proposal.id,
         commitment,
-        leaf_index,  // captured before saturating_add, not recomputed after
+        leaf_index,
     });
 
     msg!("Voter registered. Total voters: {}", proposal.voter_count);
@@ -79,23 +65,45 @@ pub struct VoterRegistered {
 }
 
 #[derive(Accounts)]
-#[instruction(commitment: [u8; HASH_SIZE])]
 pub struct RegisterVoter<'info> {
     #[account(mut)]
     pub admin: Signer<'info>,
 
-    /// The voter being registered. Must co-sign so the admin cannot register a
-    /// different commitment under the same voter identity without the voter's key,
-    /// and so one Solana identity maps to at most one commitment per proposal.
-    pub voter: Signer<'info>,
+    /// The voter being registered. Not required to sign here — their commitment
+    /// was already bound to this pubkey when they called `register_commitment`
+    /// (which required their signature). The admin cannot swap in a different
+    /// voter pubkey without also producing a different `pending_commitment` PDA,
+    /// which must have been created by that voter's signature.
+    ///
+    /// Marked `mut` so it can receive the `pending_commitment` rent refund.
+    /// CHECK: pubkey is verified via seeds on `pending_commitment` and `voter_record`.
+    #[account(mut)]
+    pub voter: UncheckedAccount<'info>,
 
+    /// Heap-boxed so the ~1 200-byte Proposal struct is allocated on the heap
+    /// rather than the BPF stack, keeping the frame within Solana's 4 096-byte limit.
     #[account(
         mut,
         has_one = admin @ BallotError::Unauthorized,
         seeds = [SEED_PROPOSAL, proposal.admin.as_ref(), proposal.title_seed.as_ref()],
         bump = proposal.bump,
     )]
-    pub proposal: Account<'info, Proposal>,
+    pub proposal: Box<Account<'info, Proposal>>,
+
+    /// The PendingCommitmentRecord created by the voter in `register_commitment`.
+    /// Closed here — rent returned to `voter`. Reading `.commitment` before
+    /// closure is the canonical way to hand off voter-controlled data to the admin.
+    ///
+    /// Must appear BEFORE `commitment_record` in this struct because Anchor
+    /// evaluates seeds constraints top-to-bottom: `commitment_record` seeds
+    /// reference `pending_commitment.commitment`.
+    #[account(
+        mut,
+        seeds = [SEED_PENDING_COMMITMENT, proposal.key().as_ref(), voter.key().as_ref()],
+        bump = pending_commitment.bump,
+        close = voter,
+    )]
+    pub pending_commitment: Account<'info, PendingCommitmentRecord>,
 
     /// Commitment uniqueness guard. `init_if_needed` recovers a pre-funded (squatted)
     /// PDA transparently; genuine duplicate calls are caught by the handler's
@@ -104,7 +112,7 @@ pub struct RegisterVoter<'info> {
         init_if_needed,
         payer = admin,
         space = CommitmentRecord::LEN,
-        seeds = [SEED_COMMITMENT, proposal.key().as_ref(), commitment.as_ref()],
+        seeds = [SEED_COMMITMENT, proposal.key().as_ref(), pending_commitment.commitment.as_ref()],
         bump,
     )]
     pub commitment_record: Account<'info, CommitmentRecord>,
