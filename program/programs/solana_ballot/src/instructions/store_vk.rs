@@ -4,9 +4,17 @@ use crate::state::program_config::ProgramConfig;
 use crate::error::BallotError;
 use crate::constants::*;
 
-/// Stores the Groth16 prepared verifying key on-chain.
+/// Stores the Groth16 prepared verifying key for a specific proposal on-chain.
 ///
-/// Gated to the program authority stored in `ProgramConfig` (set by `initialize`).
+/// Gated to the proposal admin via `has_one = admin` on the proposal account.
+/// The VK PDA is scoped per-proposal (`seeds = [SEED_VK, proposal.key()]`), so:
+///
+/// - A compromised or crafted VK only affects the one proposal it was stored for;
+///   every other election retains its own independent key (limited blast radius).
+/// - Circuit upgrades are handled by deploying new proposals that store a new VK;
+///   no program redeployment is required.
+/// - Proposals with different circuit parameters (e.g. additional public inputs)
+///   can coexist with distinct per-proposal VK accounts.
 ///
 /// Uses `init_if_needed` so that a pre-funded (squatted) PDA — an attacker sending
 /// lamports to the deterministic VK address before this instruction is called — does
@@ -97,7 +105,23 @@ pub struct StoreVk<'info> {
     )]
     pub program_config: Account<'info, ProgramConfig>,
 
-    /// PDA holding the verifying key — one per program deployment.
+    /// The proposal this VK is associated with.
+    ///
+    /// Only the address is consumed here (as a PDA seed for `vk_account`).
+    /// No account data is deserialized, avoiding the ~1 200-byte Proposal
+    /// struct from blowing the BPF stack frame. Authority is already
+    /// enforced by `program_config` — the same trusted party that creates
+    /// proposals also runs the trusted-setup ceremony.
+    ///
+    /// Any address may technically be passed, but only the matching proposal
+    /// will be able to load the resulting VK account (the `open_voting` and
+    /// `cast_vote` seeds constraints re-derive the address from the live
+    /// `proposal` account key).
+    /// CHECK: Address used as seed only; no data read.
+    pub proposal: UncheckedAccount<'info>,
+
+    /// Per-proposal VK PDA. Scoped to this proposal so a compromised key
+    /// cannot affect any other election.
     /// `init_if_needed` recovers a squatted (pre-funded) PDA without error.
     /// The single-write invariant is enforced by the `is_initialized` check
     /// in the handler, preventing mid-election key replacement.
@@ -105,7 +129,7 @@ pub struct StoreVk<'info> {
         init_if_needed,
         payer = admin,
         space = VerificationKeyAccount::LEN,
-        seeds = [SEED_VK],
+        seeds = [SEED_VK, proposal.key().as_ref()],
         bump,
     )]
     pub vk_account: Account<'info, VerificationKeyAccount>,

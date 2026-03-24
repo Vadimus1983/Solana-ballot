@@ -248,12 +248,13 @@ pub struct CastVote<'info> {
     )]
     pub proposal: Account<'info, Proposal>,
 
-    /// Groth16 VK PDA. Using a typed account with the stored bump avoids
-    /// `find_program_address` re-derivation and is consistent with every other
-    /// PDA in the program. The `is_initialized` constraint enforces that
-    /// `store_vk` was called before any vote is accepted, in both dev and prod.
+    /// Per-proposal Groth16 VK PDA. Scoped to this proposal so a bad key on
+    /// one election cannot affect another. Using a typed account with the stored
+    /// bump avoids `find_program_address` re-derivation and is consistent with
+    /// every other PDA in the program. The `is_initialized` constraint enforces
+    /// that `store_vk` was called before any vote is accepted, in both dev and prod.
     #[account(
-        seeds = [SEED_VK],
+        seeds = [SEED_VK, proposal.key().as_ref()],
         bump = vk_account.bump,
         constraint = vk_account.is_initialized @ BallotError::VkNotInitialized,
     )]

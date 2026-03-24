@@ -65,11 +65,13 @@ pub mod solana_ballot {
         instructions::register_voter::handler(ctx, commitment)
     }
 
-    /// Stores the Groth16 verifying key on-chain after the trusted setup ceremony.
+    /// Stores the Groth16 verifying key on-chain for a specific proposal.
     ///
-    /// Must be called once by the admin before any votes can be cast with real
-    /// ZK proof verification. Until this is called, `cast_vote` runs in
-    /// development mode (proof verification skipped).
+    /// Must be called once by the program authority before `open_voting`.
+    /// The VK is scoped per-proposal (seeded by the proposal's on-chain address)
+    /// so a compromised or incorrectly generated key affects only that one election.
+    /// Circuit upgrades are handled by deploying a new proposal with a new VK;
+    /// no program redeployment is required.
     ///
     /// # Parameters
     ///

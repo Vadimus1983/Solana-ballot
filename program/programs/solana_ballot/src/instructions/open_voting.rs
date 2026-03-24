@@ -84,10 +84,11 @@ pub struct OpenVoting<'info> {
     )]
     pub proposal: Account<'info, Proposal>,
 
-    /// Groth16 VK PDA. Using a typed account with the stored bump avoids
-    /// the `find_program_address` call that dynamic bump re-derivation requires,
-    /// and is consistent with every other PDA in the program.
+    /// Per-proposal Groth16 VK PDA. Scoped to this proposal so a bad key on
+    /// one election cannot affect another. Using a typed account with the stored
+    /// bump avoids the `find_program_address` call that dynamic bump re-derivation
+    /// requires, and is consistent with every other PDA in the program.
     /// In production the handler checks `is_initialized`; dev builds skip it.
-    #[account(seeds = [SEED_VK], bump = vk_account.bump)]
+    #[account(seeds = [SEED_VK, proposal.key().as_ref()], bump = vk_account.bump)]
     pub vk_account: Account<'info, VerificationKeyAccount>,
 }
