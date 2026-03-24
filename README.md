@@ -44,12 +44,16 @@ Solana-ballot/
 │   │       │   │                       # PendingCommitmentRecord
 │   │       │   └── vk.rs               # VerificationKeyAccount (Groth16 VK)
 │   │       └── instructions/     # 15 instruction handlers
-│   └── tests/program.ts          # Anchor integration tests (~1 500 lines)
+│   └── tests/program.ts          # Anchor integration tests (~1 550 lines)
 └── client/                       # React + Vite frontend (TypeScript / Tailwind)
     └── src/
+        ├── assets/               # Static assets (hero.png, vite.svg)
+        ├── components/           # TxButton, ProposalCard, StatusBadge, WalletButton, DevModeNotice
         ├── panels/               # AdminPanel, VoterPanel, ResultsView
         ├── hooks/                # useProgram, useProposal
-        └── lib/                  # anchor.ts, pda.ts, devProof.ts
+        ├── lib/                  # anchor.ts, pda.ts, devProof.ts
+        ├── solana_ballot.json    # Generated IDL
+        └── solana_ballot.ts      # Generated TypeScript types
 ```
 
 ### Account Hierarchy
@@ -310,10 +314,6 @@ The `merkle_root` in the `Proposal` account reflects the state after the last `r
 
 `store_vk` is a one-write, no-replace instruction. If the wrong VK is uploaded (e.g., a test key, or a key for the wrong circuit), the proposal is unrecoverable — no vote can ever pass verification. The only remedy is to expire the proposal and start a new one.
 
-### 10. Migration Script Is a Stub
-
-`program/migrations/deploy.ts` contains no deployment logic. Production deployment steps (initialize, create_proposal, store_vk) must be performed manually via CLI or a custom script.
-
 ---
 
 ## Pros & Cons vs. Alternatives
@@ -391,7 +391,7 @@ yarn dev
 2. Complete the trusted-setup ceremony; serialize the VK to `groth16-solana` format.
 3. `anchor build` (without `--features dev`) — the compile-time guard will block if step 1 was skipped.
 4. Deploy: `anchor deploy`.
-5. Call `initialize`, `create_proposal`, and `store_vk` via CLI or a custom migration script.
+5. Call `initialize`, `create_proposal`, and `store_vk` via CLI or a custom script.
 
 ### Program ID
 
