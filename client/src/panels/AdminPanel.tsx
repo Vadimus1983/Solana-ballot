@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { BN } from "@coral-xyz/anchor";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { PublicKey } from "@solana/web3.js";
 import { useProgram } from "../hooks/useProgram";
 import { TxButton } from "../components/TxButton";
 import { getProposalPda } from "../lib/pda";
 import type { ProposalAccount } from "../hooks/useProposal";
-import type { PublicKey } from "@solana/web3.js";
 
 interface Props {
   proposal: ProposalAccount | null;
@@ -23,7 +23,7 @@ export function AdminPanel({ proposal, proposalPda, onRefresh, onProposalCreated
 
   const isAdmin = proposal
     ? proposal.admin.toBase58() === publicKey.toBase58()
-    : true; // no proposal yet — anyone can create
+    : true;
 
   if (proposal && !isAdmin) {
     return <p className="text-slate-500">You are not the admin of this proposal.</p>;
@@ -77,10 +77,13 @@ function CreateProposalForm({ program, admin, onCreated, onRefresh }: {
     const pda = getProposalPda(admin, title);
     const votingStart = new BN(Math.floor(new Date(start).getTime() / 1000));
     const votingEnd   = new BN(Math.floor(new Date(end).getTime() / 1000));
+
+    // program_config is auto-derived by Anchor (PDA seeds ["config"] in IDL).
     await program.methods
       .createProposal(title, desc, votingStart, votingEnd)
       .accounts({ admin, proposal: pda })
       .rpc();
+
     onCreated(pda);
     onRefresh();
   }
@@ -90,15 +93,16 @@ function CreateProposalForm({ program, admin, onCreated, onRefresh }: {
       <h3 className="font-semibold text-slate-800">Create Proposal</h3>
       <input
         className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-        placeholder="Title (max 32 bytes)"
+        placeholder="Title (max 128 chars)"
         value={title} onChange={e => setTitle(e.target.value)}
-        maxLength={32}
+        maxLength={128}
       />
       <textarea
         className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-        placeholder="Description"
+        placeholder="Description (max 256 chars)"
         rows={2}
         value={desc} onChange={e => setDesc(e.target.value)}
+        maxLength={256}
       />
       <div className="grid grid-cols-2 gap-3">
         <div>
@@ -124,44 +128,48 @@ function RegisterVoterForm({ program, proposalPda, onRefresh }: {
   proposalPda: PublicKey;
   onRefresh: () => void;
 }) {
-  const [hex, setHex] = useState("");
-
-  function fillTest() {
-    setHex("01".repeat(32));
-  }
+  const [voterAddress, setVoterAddress] = useState("");
 
   async function submit() {
     if (!program) return;
-    const commitment = Array.from(Buffer.from(hex.replace(/\s/g, ""), "hex"));
+
+    let voterPubkey: PublicKey;
+    try {
+      voterPubkey = new PublicKey(voterAddress.trim());
+    } catch {
+      alert("Invalid voter public key.");
+      return;
+    }
+
+    // register_voter takes no args — the commitment is read from the
+    // PendingCommitmentRecord the voter submitted via register_commitment.
+    // All PDAs (pending_commitment, commitment_record, voter_record) are
+    // auto-derived by Anchor from the IDL seeds using voter + proposal.
     await program.methods
-      .registerVoter(commitment as number[])
-      .accounts({ proposal: proposalPda })
+      .registerVoter()
+      .accounts({ voter: voterPubkey, proposal: proposalPda })
       .rpc();
-    setHex("");
+
+    setVoterAddress("");
     onRefresh();
   }
 
-  const valid = /^[0-9a-fA-F]{64}$/.test(hex.replace(/\s/g, ""));
+  const valid = (() => { try { new PublicKey(voterAddress.trim()); return true; } catch { return false; } })();
 
   return (
     <section className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
       <h3 className="font-semibold text-slate-800">Register Voter</h3>
       <p className="text-xs text-slate-500">
-        Paste the voter's 32-byte commitment as a 64-character hex string (Poseidon of their secret key + randomness).
+        Enter the voter's Solana public key. The voter must have already called{" "}
+        <strong>Register Commitment</strong> (step 1 of the two-phase registration protocol)
+        before you can register them here.
       </p>
-      <div className="flex gap-2">
-        <input
-          className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono"
-          placeholder="64-char hex commitment"
-          value={hex} onChange={e => setHex(e.target.value)}
-        />
-        <button
-          onClick={fillTest}
-          className="px-3 py-2 text-xs bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-600"
-        >
-          Test value
-        </button>
-      </div>
+      <input
+        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono"
+        placeholder="Voter public key (base58)"
+        value={voterAddress}
+        onChange={e => setVoterAddress(e.target.value)}
+      />
       <TxButton label="Register Voter" onClick={submit} disabled={!valid} />
     </section>
   );
@@ -176,19 +184,27 @@ function LifecycleControls({ program, proposalPda, status, voterCount, onRefresh
   voterCount: number;
   onRefresh: () => void;
 }) {
+  // open_voting: admin (via `relations`) + proposal (passed) + vk_account (auto-derived).
   async function openVoting() {
     await program!.methods.openVoting()
-      .accounts({ proposal: proposalPda }).rpc();
+      .accounts({ proposal: proposalPda })
+      .rpc();
     onRefresh();
   }
+
+  // close_voting: closer (wallet, any signer) + proposal (passed, auto-PDA verified).
   async function closeVoting() {
     await program!.methods.closeVoting()
-      .accounts({ proposal: proposalPda }).rpc();
+      .accounts({ proposal: proposalPda })
+      .rpc();
     onRefresh();
   }
+
+  // finalize_tally: finalizer (wallet, any signer) + proposal (passed, auto-PDA verified).
   async function finalizeTally() {
     await program!.methods.finalizeTally()
-      .accounts({ proposal: proposalPda }).rpc();
+      .accounts({ proposal: proposalPda })
+      .rpc();
     onRefresh();
   }
 

@@ -6,10 +6,17 @@ import {
   DEV_RANDOMNESS,
   computeDevCommitment,
   generateDevNullifier,
+  generateDevCommitment,
 } from "../lib/devProof";
 import { getVoteRecordPda } from "../lib/pda";
 import type { ProposalAccount } from "../hooks/useProposal";
 import type { PublicKey } from "@solana/web3.js";
+
+// ── localStorage helpers ──────────────────────────────────────────────────────
+
+interface RegistrationState {
+  commitment: number[];
+}
 
 interface BallotState {
   proposalPda: string;
@@ -19,20 +26,34 @@ interface BallotState {
   revealed: boolean;
 }
 
+function regKey(proposalPda: string) { return `reg_${proposalPda}`; }
+function ballotKey() { return "ballotState"; }
+
+function loadRegistration(proposalPda: string): RegistrationState | null {
+  try {
+    const raw = localStorage.getItem(regKey(proposalPda));
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function saveRegistration(proposalPda: string, state: RegistrationState) {
+  localStorage.setItem(regKey(proposalPda), JSON.stringify(state));
+}
+
 function loadBallot(proposalPda: string): BallotState | null {
   try {
-    const raw = localStorage.getItem("ballotState");
+    const raw = localStorage.getItem(ballotKey());
     if (!raw) return null;
     const s: BallotState = JSON.parse(raw);
     return s.proposalPda === proposalPda ? s : null;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 function saveBallot(state: BallotState) {
-  localStorage.setItem("ballotState", JSON.stringify(state));
+  localStorage.setItem(ballotKey(), JSON.stringify(state));
 }
+
+// ── Root component ────────────────────────────────────────────────────────────
 
 interface Props {
   proposal: ProposalAccount | null;
@@ -48,15 +69,26 @@ export function VoterPanel({ proposal, proposalPda, onRefresh }: Props) {
   if (!proposal || !proposalPda || !program) return <p className="text-slate-500">No active proposal.</p>;
 
   const status = Object.keys(proposal.status)[0];
+  const reg = loadRegistration(proposalPda.toBase58());
   const ballot = loadBallot(proposalPda.toBase58());
 
   if (status === "registration") {
-    return <Notice>Registration is open — voting has not started yet.</Notice>;
+    if (reg) {
+      return <Notice>Commitment submitted. Waiting for the admin to complete your registration.</Notice>;
+    }
+    return (
+      <RegisterCommitmentForm
+        program={program}
+        voter={publicKey}
+        proposalPda={proposalPda}
+        onSuccess={onRefresh}
+      />
+    );
   }
 
   if (status === "voting") {
     if (ballot && !ballot.revealed) {
-      return <Notice>Vote cast! Wait for the proposal to close, then come back to reveal your vote.</Notice>;
+      return <Notice>Vote cast! Wait for voting to close, then come back to reveal your vote.</Notice>;
     }
     return (
       <CastVoteForm
@@ -74,7 +106,6 @@ export function VoterPanel({ proposal, proposalPda, onRefresh }: Props) {
     return (
       <RevealVoteForm
         program={program}
-        voter={publicKey}
         proposalPda={proposalPda}
         ballot={ballot}
         onSuccess={onRefresh}
@@ -93,6 +124,42 @@ function Notice({ children }: { children: React.ReactNode }) {
   );
 }
 
+// ── Register Commitment (step 1 of two-phase registration) ────────────────────
+
+function RegisterCommitmentForm({ program, voter, proposalPda, onSuccess }: {
+  program: NonNullable<ReturnType<typeof useProgram>>;
+  voter: PublicKey;
+  proposalPda: PublicKey;
+  onSuccess: () => void;
+}) {
+  async function submit() {
+    const commitment = generateDevCommitment();
+
+    // proposal PDA is auto-derived by Anchor (IDL has its seeds).
+    // pending_commitment PDA is auto-derived from [proposal, voter].
+    await program.methods
+      .registerCommitment(Array.from(commitment) as number[] & { length: 32 })
+      .accounts({ voter, proposal: proposalPda })
+      .rpc();
+
+    saveRegistration(proposalPda.toBase58(), { commitment: Array.from(commitment) });
+    onSuccess();
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-4">
+      <h3 className="font-semibold text-slate-800">Register to Vote</h3>
+      <p className="text-sm text-slate-500">
+        Submit your voter commitment to be included in this election.
+        A random commitment is generated for you in dev mode — in production
+        this would be derived from your secret key using Poseidon hashing.
+        After submitting, the admin will complete your registration.
+      </p>
+      <TxButton label="Submit Commitment" onClick={submit} />
+    </div>
+  );
+}
+
 // ── Cast Vote ─────────────────────────────────────────────────────────────────
 
 function CastVoteForm({ program, voter, proposalPda, onSuccess }: {
@@ -105,11 +172,16 @@ function CastVoteForm({ program, voter, proposalPda, onSuccess }: {
     const nullifier = generateDevNullifier();
     const voteCommitment = computeDevCommitment(vote, DEV_RANDOMNESS);
 
+    // nullifier_record and vote_record PDAs are auto-derived by Anchor
+    // (seeded by [nullifier, proposal] — in IDL with "arg" kind for nullifier).
+    // vk_account is auto-derived from [\"vk\", proposal] (also in IDL).
+    // refund_to = voter so the voter reclaims rent after cleanup.
     await program.methods
       .castVote(
-        Buffer.from(DEV_PROOF),           // proof: Vec<u8>
-        Array.from(nullifier),            // nullifier: [u8; 32]
-        Array.from(voteCommitment),       // vote_commitment: Poseidon(vote, randomness)
+        Buffer.from(DEV_PROOF),         // proof: Vec<u8>
+        Array.from(nullifier),          // nullifier: [u8; 32]
+        Array.from(voteCommitment),     // vote_commitment: [u8; 32]
+        voter,                          // refund_to: Pubkey
       )
       .accounts({
         voter,
@@ -145,22 +217,23 @@ function CastVoteForm({ program, voter, proposalPda, onSuccess }: {
 
 // ── Reveal Vote ───────────────────────────────────────────────────────────────
 
-function RevealVoteForm({ program, voter, proposalPda, ballot, onSuccess }: {
+function RevealVoteForm({ program, proposalPda, ballot, onSuccess }: {
   program: NonNullable<ReturnType<typeof useProgram>>;
-  voter: PublicKey;
   proposalPda: PublicKey;
   ballot: BallotState;
   onSuccess: () => void;
 }) {
   async function reveal() {
-    const nullifier    = new Uint8Array(ballot.nullifier);
-    const randomness   = new Uint8Array(ballot.randomness);
+    const nullifier   = new Uint8Array(ballot.nullifier);
+    const randomness  = new Uint8Array(ballot.randomness);
     const voteRecordPda = getVoteRecordPda(proposalPda, nullifier);
 
+    // reveal_vote signer is `revealer` — any account, not necessarily the voter.
+    // Passing vote_record explicitly since its seed path references a stored
+    // field (nullifier) that Anchor cannot pre-fetch without the account address.
     await program.methods
       .revealVote(ballot.vote, Array.from(randomness))
       .accounts({
-        voter,
         proposal: proposalPda,
         voteRecord: voteRecordPda,
       })
