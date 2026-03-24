@@ -76,13 +76,14 @@ pub struct OpenVoting<'info> {
 
     /// The proposal being transitioned to Voting status.
     /// Verified to be owned by `admin` via `has_one`.
+    /// Heap-boxed to keep the BPF stack frame within Solana's 4 096-byte limit.
     #[account(
         mut,
         has_one = admin @ BallotError::Unauthorized,
         seeds = [SEED_PROPOSAL, proposal.admin.as_ref(), proposal.title_seed.as_ref()],
         bump = proposal.bump,
     )]
-    pub proposal: Account<'info, Proposal>,
+    pub proposal: Box<Account<'info, Proposal>>,
 
     /// Per-proposal Groth16 VK PDA. Scoped to this proposal so a bad key on
     /// one election cannot affect another. Using a typed account with the stored

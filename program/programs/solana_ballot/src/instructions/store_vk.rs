@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 use crate::state::vk::VerificationKeyAccount;
 use crate::state::program_config::ProgramConfig;
+use crate::state::proposal::Proposal;
 use crate::error::BallotError;
 use crate::constants::*;
 
@@ -107,18 +108,13 @@ pub struct StoreVk<'info> {
 
     /// The proposal this VK is associated with.
     ///
-    /// Only the address is consumed here (as a PDA seed for `vk_account`).
-    /// No account data is deserialized, avoiding the ~1 200-byte Proposal
-    /// struct from blowing the BPF stack frame. Authority is already
-    /// enforced by `program_config` — the same trusted party that creates
-    /// proposals also runs the trusted-setup ceremony.
-    ///
-    /// Any address may technically be passed, but only the matching proposal
-    /// will be able to load the resulting VK account (the `open_voting` and
-    /// `cast_vote` seeds constraints re-derive the address from the live
-    /// `proposal` account key).
-    /// CHECK: Address used as seed only; no data read.
-    pub proposal: UncheckedAccount<'info>,
+    /// Heap-boxed so the ~1 200-byte Proposal struct is allocated on the heap
+    /// rather than the BPF stack, keeping the frame within Solana's 4 096-byte
+    /// limit. Anchor's implicit owner + discriminator checks ensure only a
+    /// genuine program-owned Proposal account is accepted — any other address
+    /// (random keypair, system account, foreign PDA) is rejected before the
+    /// handler runs.
+    pub proposal: Box<Account<'info, Proposal>>,
 
     /// Per-proposal VK PDA. Scoped to this proposal so a compromised key
     /// cannot affect any other election.
