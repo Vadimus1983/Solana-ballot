@@ -47,7 +47,7 @@ pub struct CloseCommitmentRecord<'info> {
         bump = proposal.bump,
         constraint = proposal.status.is_terminal() @ BallotError::NotFinalized,
     )]
-    pub proposal: Account<'info, Proposal>,
+    pub proposal: Box<Account<'info, Proposal>>,
 
     /// Seeds are derived from `commitment_record.commitment` — the value stored
     /// at registration time. Anchor re-derives the expected PDA from those bytes

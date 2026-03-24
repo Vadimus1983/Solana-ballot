@@ -30,5 +30,5 @@ pub struct CloseProposal<'info> {
         constraint = proposal.closed_commitment_count >= proposal.voter_count @ BallotError::CommitmentAccountsNotClosed,
         close = admin,
     )]
-    pub proposal: Account<'info, Proposal>,
+    pub proposal: Box<Account<'info, Proposal>>,
 }

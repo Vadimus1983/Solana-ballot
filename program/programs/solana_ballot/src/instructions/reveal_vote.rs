@@ -52,7 +52,7 @@ pub struct RevealVote<'info> {
         seeds = [SEED_PROPOSAL, proposal.admin.as_ref(), proposal.title_seed.as_ref()],
         bump = proposal.bump,
     )]
-    pub proposal: Account<'info, Proposal>,
+    pub proposal: Box<Account<'info, Proposal>>,
 
     // Seeds include the nullifier so each voter has a unique, unlinkable record.
     // `proposal_id` guards against cross-proposal replay.

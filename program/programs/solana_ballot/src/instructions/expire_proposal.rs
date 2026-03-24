@@ -40,5 +40,5 @@ pub struct ExpireProposal<'info> {
         bump = proposal.bump,
         constraint = proposal.status == ProposalStatus::Registration @ BallotError::NotInRegistration,
     )]
-    pub proposal: Account<'info, Proposal>,
+    pub proposal: Box<Account<'info, Proposal>>,
 }

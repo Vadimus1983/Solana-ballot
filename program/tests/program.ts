@@ -471,6 +471,29 @@ describe("solana_ballot", () => {
     }
   });
 
+  it("Accepts create_proposal with a short window in dev (MIN_VOTING_DURATION gate is production-only)", async () => {
+    // MIN_VOTING_DURATION (1 hour) is enforced only in production builds to prevent
+    // sham elections whose voting window expires before open_voting can be called.
+    // In dev builds the check is skipped so tests can use short voting windows.
+    // This test confirms the dev gate is active: a 2-second window must be accepted.
+    const shortTitle = "Short window dev test";
+    const shortPda = getProposalPda(admin.publicKey, shortTitle);
+    const now = Math.floor(Date.now() / 1000);
+
+    await program.methods
+      .createProposal(shortTitle, description, new anchor.BN(now - 1), new anchor.BN(now + 3600))
+      .accounts({
+        admin: admin.publicKey,
+        programConfig: programConfigPda,
+        proposal: shortPda,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const proposal = await program.account.proposal.fetch(shortPda);
+    assert.equal(proposal.title, shortTitle);
+  });
+
   it("Rejects voter registration by non-admin", async () => {
     const altTitle = "Alt proposal";
     const altPda = getProposalPda(admin.publicKey, altTitle);

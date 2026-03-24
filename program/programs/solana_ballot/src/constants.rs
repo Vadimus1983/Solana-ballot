@@ -64,6 +64,12 @@ pub const MAX_VOTING_START_DRIFT: i64 = 60;
 /// Indexers must check VoteRecord.revealed == true before reading .vote.
 pub const VOTE_UNREVEALED: u8 = 0xFF;
 
+/// Minimum allowed voting window (voting_end - voting_start).
+/// Prevents structurally un-openable proposals: with MAX_VOTING_START_DRIFT = 60 s,
+/// a window shorter than 60 s can expire before open_voting is even callable.
+/// 1 hour gives voters and the admin reasonable time to act.
+pub const MIN_VOTING_DURATION: i64 = 60 * 60; // 3_600
+
 /// Maximum allowed voting window (voting_end - voting_start).
 /// Caps storage occupancy and prevents indefinitely open elections.
 /// 30 days in seconds.

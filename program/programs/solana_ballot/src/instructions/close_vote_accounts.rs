@@ -62,7 +62,7 @@ pub struct CloseVoteAccounts<'info> {
         bump = proposal.bump,
         constraint = proposal.status == ProposalStatus::Finalized @ BallotError::NotFinalized,
     )]
-    pub proposal: Account<'info, Proposal>,
+    pub proposal: Box<Account<'info, Proposal>>,
 
     #[account(
         mut,

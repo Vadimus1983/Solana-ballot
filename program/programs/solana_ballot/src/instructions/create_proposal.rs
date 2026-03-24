@@ -22,6 +22,9 @@ pub fn handler(
     let duration = voting_end
         .checked_sub(voting_start)
         .ok_or(error!(BallotError::InvalidVotingPeriod))?;
+    // Minimum enforced in production only — dev builds use short windows for testing.
+    #[cfg(not(feature = "dev"))]
+    require!(duration >= MIN_VOTING_DURATION, BallotError::InvalidVotingPeriod);
     require!(duration <= MAX_VOTING_DURATION, BallotError::InvalidVotingPeriod);
 
     let clock = Clock::get()?;
@@ -89,7 +92,7 @@ pub struct CreateProposal<'info> {
         ],
         bump
     )]
-    pub proposal: Account<'info, Proposal>,
+    pub proposal: Box<Account<'info, Proposal>>,
 
     pub system_program: Program<'info, System>,
 }

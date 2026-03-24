@@ -35,5 +35,5 @@ pub struct CloseVoting<'info> {
         seeds = [SEED_PROPOSAL, proposal.admin.as_ref(), proposal.title_seed.as_ref()],
         bump = proposal.bump,
     )]
-    pub proposal: Account<'info, Proposal>,
+    pub proposal: Box<Account<'info, Proposal>>,
 }
