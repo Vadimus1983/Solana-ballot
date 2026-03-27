@@ -55,6 +55,11 @@ pub const MERKLE_FRONTIER_SIZE: usize = MERKLE_DEPTH * HASH_SIZE; // 640 bytes
 /// ROOT_HISTORY_SIZE must not exceed 256 without also widening that field.
 pub const ROOT_HISTORY_SIZE: usize = 256;
 
+/// Compile-time guard: ROOT_HISTORY_SIZE must fit in a u8 (RootHistoryAccount.root_history_index
+/// is a u8 that wraps naturally at 256). Widening that field is required before raising this limit.
+const _ROOT_HISTORY_SIZE_FITS_U8: () =
+    assert!(ROOT_HISTORY_SIZE <= 256, "ROOT_HISTORY_SIZE exceeds u8 range — widen root_history_index first");
+
 /// Number of public inputs in the combined ZK proof:
 ///   nullifier, proposal_id, merkle_root, vote_commitment
 pub const NUM_PUBLIC_INPUTS: usize = 4;
