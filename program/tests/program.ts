@@ -142,6 +142,19 @@ describe("solana_ballot", () => {
     return pda;
   }
 
+  function getRootHistoryPda(proposalKey: anchor.web3.PublicKey) {
+    const [pda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("root_history"), proposalKey.toBuffer()],
+      program.programId
+    );
+    return pda;
+  }
+
+  async function getMerkleRoot(proposalKey: anchor.web3.PublicKey): Promise<number[]> {
+    const prop = await program.account.proposal.fetch(proposalKey);
+    return prop.merkleRoot as number[];
+  }
+
   /**
    * Two-phase voter registration helper.
    * Phase 1: voter calls registerCommitment (binds commitment to their identity).
@@ -319,11 +332,13 @@ describe("solana_ballot", () => {
 
     // VK is initialized above. In dev mode the Groth16 math is skipped but
     // the VK must be present — the unconditional VK guard enforces this.
+    const merkleRoot = await getMerkleRoot(proposalPda);
     await program.methods
       .castVote(
         proof,           // Vec<u8>: proof_a (64) || proof_b (128) || proof_c (64)
         [...nullifier],
         [...voteCommitment],
+        merkleRoot,      // merkle_root: accepted if in root history ring buffer
         admin.publicKey, // refund_to: rent returned here after finalization
       )
       .accounts({
@@ -740,11 +755,13 @@ describe("solana_ballot", () => {
 
   it("Rejects double vote with same nullifier", async () => {
     try {
+      const merkleRoot2 = await getMerkleRoot(proposalPda);
       await program.methods
         .castVote(
           proof,
           [...nullifier],
           [...voteCommitment],
+          merkleRoot2,
           admin.publicKey,
         )
         .accounts({
@@ -786,8 +803,9 @@ describe("solana_ballot", () => {
       .rpc();
 
     try {
+      const zvMerkleRoot = await getMerkleRoot(zvPda);
       await program.methods
-        .castVote(proof, [...zvNullifier], [...Buffer.alloc(32, 0)], admin.publicKey)  // zero commitment
+        .castVote(proof, [...zvNullifier], [...Buffer.alloc(32, 0)], zvMerkleRoot, admin.publicKey)  // zero commitment
         .accounts({
           voter: admin.publicKey, proposal: zvPda, vkAccount: getVkPda(zvPda),
           nullifierRecord: zvNullifierPda, voteRecord: zvVoteRecordPda,
@@ -823,8 +841,9 @@ describe("solana_ballot", () => {
       .rpc();
 
     try {
+      const znMerkleRoot = await getMerkleRoot(znPda);
       await program.methods
-        .castVote(proof, [...zeroNullifier], [...voteCommitment], admin.publicKey)
+        .castVote(proof, [...zeroNullifier], [...voteCommitment], znMerkleRoot, admin.publicKey)
         .accounts({
           voter: admin.publicKey, proposal: znPda, vkAccount: getVkPda(znPda),
           nullifierRecord: znNullifierPda, voteRecord: znVoteRecordPda,
@@ -888,8 +907,9 @@ describe("solana_ballot", () => {
       .accounts({ admin: admin.publicKey, proposal: cmPda, vkAccount: getVkPda(cmPda) })
       .rpc();
 
+    const cmMerkleRoot = await getMerkleRoot(cmPda);
     await program.methods
-      .castVote(proof, [...cmNullifier], [...cmCommitment], admin.publicKey)
+      .castVote(proof, [...cmNullifier], [...cmCommitment], cmMerkleRoot, admin.publicKey)
       .accounts({
         voter: admin.publicKey, proposal: cmPda, vkAccount: getVkPda(cmPda),
         nullifierRecord: cmNullifierPda, voteRecord: cmVoteRecordPda,
@@ -942,8 +962,9 @@ describe("solana_ballot", () => {
       .accounts({ admin: admin.publicKey, proposal: wvPda, vkAccount: getVkPda(wvPda) })
       .rpc();
 
+    const wvMerkleRoot = await getMerkleRoot(wvPda);
     await program.methods
-      .castVote(proof, [...wvNullifier], [...wvCommitment], admin.publicKey)
+      .castVote(proof, [...wvNullifier], [...wvCommitment], wvMerkleRoot, admin.publicKey)
       .accounts({
         voter: admin.publicKey, proposal: wvPda, vkAccount: getVkPda(wvPda),
         nullifierRecord: wvNullifierPda, voteRecord: wvVoteRecordPda,
@@ -1036,8 +1057,9 @@ describe("solana_ballot", () => {
       .accounts({ admin: admin.publicKey, proposal: gracePda, vkAccount: getVkPda(gracePda) })
       .rpc();
 
+    const graceMerkleRoot = await getMerkleRoot(gracePda);
     await program.methods
-      .castVote(proof, [...graceNullifier], [...graceCommitment], admin.publicKey)
+      .castVote(proof, [...graceNullifier], [...graceCommitment], graceMerkleRoot, admin.publicKey)
       .accounts({
         voter: admin.publicKey, proposal: gracePda, vkAccount: getVkPda(gracePda),
         nullifierRecord: graceNullifierPda, voteRecord: graceVoteRecordPda,
@@ -1103,8 +1125,9 @@ describe("solana_ballot", () => {
       .accounts({ admin: admin.publicKey, proposal: partPda, vkAccount: getVkPda(partPda) })
       .rpc();
 
+    const partMerkleRoot = await getMerkleRoot(partPda);
     for (const [nul, nulPda, vPda] of [[nul1, nulPda1, voteP1], [nul2, nulPda2, voteP2]] as const) {
-      await program.methods.castVote(proof, [...nul], [...partCommitment], admin.publicKey)
+      await program.methods.castVote(proof, [...nul], [...partCommitment], partMerkleRoot, admin.publicKey)
         .accounts({ voter: admin.publicKey, proposal: partPda, vkAccount: getVkPda(partPda), nullifierRecord: nulPda, voteRecord: vPda, systemProgram: anchor.web3.SystemProgram.programId })
         .rpc();
     }

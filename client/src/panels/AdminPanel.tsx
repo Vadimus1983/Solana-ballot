@@ -4,7 +4,7 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
 import { useProgram } from "../hooks/useProgram";
 import { TxButton } from "../components/TxButton";
-import { getProposalPda } from "../lib/pda";
+import { getProposalPda, getRootHistoryPda } from "../lib/pda";
 import type { ProposalAccount } from "../hooks/useProposal";
 
 interface Props {
@@ -85,7 +85,7 @@ function CreateProposalForm({ program, admin, onCreated, onRefresh }: {
     // program_config is auto-derived by Anchor (PDA seeds ["config"] in IDL).
     await program.methods
       .createProposal(title, desc, votingStart, votingEnd)
-      .accounts({ admin, proposal: pda })
+      .accounts({ admin, proposal: pda, rootHistoryAccount: getRootHistoryPda(pda) })
       .rpc();
 
     onCreated(pda);
@@ -151,7 +151,7 @@ function RegisterVoterForm({ program, proposalPda, onRefresh }: {
     // auto-derived by Anchor from the IDL seeds using voter + proposal.
     await program.methods
       .registerVoter()
-      .accounts({ voter: voterPubkey, proposal: proposalPda })
+      .accounts({ voter: voterPubkey, proposal: proposalPda, rootHistoryAccount: getRootHistoryPda(proposalPda) })
       .rpc();
 
     setVoterAddress("");

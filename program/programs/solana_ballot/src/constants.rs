@@ -36,6 +36,13 @@ pub const MERKLE_DEPTH: usize = 20;
 /// Storage size for the incremental Merkle tree frontier (one hash per level).
 pub const MERKLE_FRONTIER_SIZE: usize = MERKLE_DEPTH * HASH_SIZE; // 640 bytes
 
+/// Number of historical Merkle roots retained in the Proposal account.
+/// cast_vote accepts a proof generated against any root in this ring buffer,
+/// eliminating the race condition where register_voter calls after proof
+/// generation invalidate a voter's already-computed proof.
+/// 32 slots means a voter's proof stays valid across 32 subsequent registrations.
+pub const ROOT_HISTORY_SIZE: usize = 32;
+
 /// Number of public inputs in the combined ZK proof:
 ///   nullifier, proposal_id, merkle_root, vote_commitment
 pub const NUM_PUBLIC_INPUTS: usize = 4;
@@ -49,6 +56,7 @@ pub const SEED_VOTER: &[u8] = b"voter";
 pub const SEED_VK: &[u8] = b"vk";
 pub const SEED_CONFIG: &[u8] = b"config";
 pub const SEED_PENDING_COMMITMENT: &[u8] = b"pending_commitment";
+pub const SEED_ROOT_HISTORY: &[u8] = b"root_history";
 
 /// Minimum time after voting_end before finalize_tally can run.
 /// Gives voters 24 hours to reveal after voting closes.

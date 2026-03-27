@@ -1,7 +1,8 @@
 use anchor_lang::prelude::*;
 use crate::state::proposal::Proposal;
+use crate::state::root_history::RootHistoryAccount;
 use crate::error::BallotError;
-use crate::constants::SEED_PROPOSAL;
+use crate::constants::{SEED_PROPOSAL, SEED_ROOT_HISTORY};
 
 /// Closes a finalized Proposal account and returns the rent-exempt lamports
 /// to the admin.
@@ -31,4 +32,14 @@ pub struct CloseProposal<'info> {
         close = admin,
     )]
     pub proposal: Box<Account<'info, Proposal>>,
+
+    /// Root history account for this proposal. Closed here alongside the proposal;
+    /// rent is returned to the admin.
+    #[account(
+        mut,
+        seeds = [SEED_ROOT_HISTORY, proposal.key().as_ref()],
+        bump,
+        close = admin,
+    )]
+    pub root_history_account: AccountLoader<'info, RootHistoryAccount>,
 }

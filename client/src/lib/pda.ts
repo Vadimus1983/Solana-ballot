@@ -24,6 +24,15 @@ export function getProposalPda(admin: PublicKey, title: string): PublicKey {
   return pda;
 }
 
+/** Per-proposal root history PDA — seeds: ["root_history", proposal]. */
+export function getRootHistoryPda(proposal: PublicKey): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("root_history"), proposal.toBuffer()],
+    PROGRAM_ID
+  );
+  return pda;
+}
+
 /** Per-proposal VK PDA — seeds: ["vk", proposal]. */
 export function getVkPda(proposal: PublicKey): PublicKey {
   const [pda] = PublicKey.findProgramAddressSync(

@@ -82,4 +82,7 @@ pub enum BallotError {
 
     #[msg("This voter identity has already been registered for this proposal")]
     VoterAlreadyRegistered,
+
+    #[msg("Merkle root not found in proposal root history — proof is too old or root was fabricated")]
+    UnknownMerkleRoot,
 }

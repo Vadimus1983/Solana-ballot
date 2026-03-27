@@ -9,7 +9,7 @@ import {
   generateDevNullifier,
   generateDevCommitment,
 } from "../lib/devProof";
-import { getVoteRecordPda } from "../lib/pda";
+import { getVoteRecordPda, getRootHistoryPda } from "../lib/pda";
 import type { ProposalAccount } from "../hooks/useProposal";
 import { ComputeBudgetProgram } from "@solana/web3.js";
 import type { PublicKey } from "@solana/web3.js";
@@ -144,6 +144,7 @@ export function VoterPanel({ proposal, proposalPda, onRefresh }: Props) {
           program={program}
           voter={publicKey}
           proposalPda={proposalPda}
+          merkleRoot={proposal.merkleRoot}
           onSuccess={onRefresh}
         />
       </div>
@@ -265,10 +266,11 @@ function RegisterCommitmentForm({ program, voter, proposalPda, onSuccess }: {
 
 // ── Cast Vote ─────────────────────────────────────────────────────────────────
 
-function CastVoteForm({ program, voter, proposalPda, onSuccess }: {
+function CastVoteForm({ program, voter, proposalPda, merkleRoot, onSuccess }: {
   program: NonNullable<ReturnType<typeof useProgram>>;
   voter: PublicKey;
   proposalPda: PublicKey;
+  merkleRoot: number[];
   onSuccess: () => void;
 }) {
   async function castVote(vote: 0 | 1) {
@@ -283,11 +285,13 @@ function CastVoteForm({ program, voter, proposalPda, onSuccess }: {
         Buffer.from(DEV_PROOF),         // proof: Vec<u8>
         Array.from(nullifier),          // nullifier: [u8; 32]
         Array.from(voteCommitment),     // vote_commitment: [u8; 32]
+        merkleRoot,                     // merkle_root: [u8; 32]
         voter,                          // refund_to: Pubkey
       )
       .accounts({
         voter,
         proposal: proposalPda,
+        rootHistoryAccount: getRootHistoryPda(proposalPda),
       })
       .preInstructions([
         ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),

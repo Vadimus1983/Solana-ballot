@@ -2,6 +2,7 @@ use anchor_lang::prelude::*;
 use sha3::{Digest, Keccak256};
 use crate::state::proposal::{Proposal, ProposalStatus};
 use crate::state::program_config::ProgramConfig;
+use crate::state::root_history::RootHistoryAccount;
 use crate::error::BallotError;
 use crate::constants::*;
 
@@ -63,6 +64,15 @@ pub fn handler(
     proposal.closed_commitment_count = 0;
     proposal.bump                    = ctx.bumps.proposal;
 
+    // load_init() gives a mutable reference into the zero-copy account's data buffer.
+    // root_history and root_history_index are zero-initialised by Anchor's init constraint.
+    {
+        let mut rh = ctx.accounts.root_history_account.load_init()?;
+        rh.root_history_index = 0;
+        // root_history is already zeroed; explicit assignment avoids dead_code warnings.
+        rh.root_history = [[0u8; HASH_SIZE]; ROOT_HISTORY_SIZE];
+    }
+
     emit!(ProposalCreated {
         proposal_id: proposal.id,
         admin: proposal.admin,
@@ -108,6 +118,18 @@ pub struct CreateProposal<'info> {
         bump
     )]
     pub proposal: Box<Account<'info, Proposal>>,
+
+    /// Root history ring buffer for this proposal. Created here and closed in
+    /// close_proposal. Kept separate from the Proposal account to avoid growing
+    /// that struct (which would increase BPF stack usage in try_accounts).
+    #[account(
+        init,
+        payer = admin,
+        space = RootHistoryAccount::LEN,
+        seeds = [SEED_ROOT_HISTORY, proposal.key().as_ref()],
+        bump,
+    )]
+    pub root_history_account: AccountLoader<'info, RootHistoryAccount>,
 
     pub system_program: Program<'info, System>,
 }

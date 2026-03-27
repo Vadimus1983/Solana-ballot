@@ -4,6 +4,8 @@ use groth16_solana::groth16::{Groth16Verifier, Groth16Verifyingkey};
 use crate::state::proposal::{Proposal, ProposalStatus};
 use crate::state::vote::{VoteRecord, NullifierRecord};
 use crate::state::vk::VerificationKeyAccount;
+use crate::state::root_history::RootHistoryAccount;
+use crate::constants::ROOT_HISTORY_SIZE;
 use crate::error::BallotError;
 use crate::constants::*;
 
@@ -49,6 +51,15 @@ fn verify_groth16(
         .map_err(|_| error!(BallotError::InvalidProof))?;
 
     verifier.verify().map_err(|_| error!(BallotError::InvalidProof))
+}
+
+/// Checks whether `root` is present in the ring buffer, in a dedicated stack frame.
+///
+/// Marked `#[inline(never)]` so the loop over the 1024-byte root_history array
+/// runs in its own frame and does not inflate the cast_vote handler's frame.
+#[inline(never)]
+fn root_in_history(history: &[[u8; HASH_SIZE]; ROOT_HISTORY_SIZE], root: &[u8; HASH_SIZE]) -> bool {
+    history.iter().any(|r| r == root)
 }
 
 /// Initialises a NullifierRecord in a dedicated stack frame.
@@ -109,6 +120,7 @@ pub fn handler(
     proof: Vec<u8>,
     nullifier: [u8; HASH_SIZE],
     vote_commitment: [u8; HASH_SIZE],
+    merkle_root: [u8; HASH_SIZE],
     refund_to: Pubkey,
 ) -> Result<()> {
     require!(
@@ -190,7 +202,20 @@ pub fn handler(
     // `vk_account`. In dev mode only the Groth16 math is skipped.
 
     let proposal_id = proposal.id;       // capture before mutable borrow below
-    let merkle_root = proposal.merkle_root;
+
+    // Verify the caller-supplied merkle_root was a valid root at some point
+    // during registration (checked via the ring buffer in RootHistoryAccount)
+    // OR equals the current frozen root. This allows proofs generated mid-
+    // registration to remain valid, eliminating the race condition between
+    // register_voter and cast_vote.
+    //
+    // load() gives a zero-copy reference into the heap-allocated account data;
+    // the borrow is dropped before the mutable proposal borrow below.
+    let root_is_known = {
+        let rh = ctx.accounts.root_history_account.load()?;
+        root_in_history(&rh.root_history, &merkle_root)
+    } || merkle_root == proposal.merkle_root;
+    require!(root_is_known, BallotError::UnknownMerkleRoot);
 
     // Groth16 math: runs in production; skipped in dev (proof bypass).
     #[cfg(not(feature = "dev"))]
@@ -265,6 +290,14 @@ pub struct CastVote<'info> {
         bump = proposal.bump,
     )]
     pub proposal: Box<Account<'info, Proposal>>,
+
+    /// Root history ring buffer for this proposal. Read-only in cast_vote: used to
+    /// verify the caller-supplied merkle_root was a valid root during registration.
+    #[account(
+        seeds = [SEED_ROOT_HISTORY, proposal.key().as_ref()],
+        bump,
+    )]
+    pub root_history_account: AccountLoader<'info, RootHistoryAccount>,
 
     /// Per-proposal Groth16 VK PDA. Scoped to this proposal so a bad key on
     /// one election cannot affect another. Using a typed account with the stored

@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 use crate::state::proposal::{Proposal, ProposalStatus};
+use crate::state::root_history::RootHistoryAccount;
 use crate::state::vote::{CommitmentRecord, VoterRecord, PendingCommitmentRecord};
 use crate::error::BallotError;
 use crate::constants::*;
@@ -45,6 +46,16 @@ pub fn handler(ctx: Context<RegisterVoter>) -> Result<()> {
         leaf_index,
     )?;
     proposal.merkle_root = new_root;
+
+    // Record the new root in the ring buffer so cast_vote can accept proofs
+    // generated against any root from the last ROOT_HISTORY_SIZE registrations.
+    {
+        let mut rh = ctx.accounts.root_history_account.load_mut()?;
+        let idx = (rh.root_history_index as usize) % ROOT_HISTORY_SIZE;
+        rh.root_history[idx] = new_root;
+        rh.root_history_index = rh.root_history_index.wrapping_add(1);
+    }
+
     proposal.voter_count = proposal.voter_count.saturating_add(1);
 
     emit!(VoterRegistered {
@@ -128,6 +139,15 @@ pub struct RegisterVoter<'info> {
         bump,
     )]
     pub voter_record: Account<'info, VoterRecord>,
+
+    /// Root history ring buffer for this proposal. Updated on each leaf insertion
+    /// so cast_vote can accept proofs generated against any recent root.
+    #[account(
+        mut,
+        seeds = [SEED_ROOT_HISTORY, proposal.key().as_ref()],
+        bump,
+    )]
+    pub root_history_account: AccountLoader<'info, RootHistoryAccount>,
 
     pub system_program: Program<'info, System>,
 }
