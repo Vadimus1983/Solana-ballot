@@ -55,11 +55,18 @@ fn verify_groth16(
 
 /// Checks whether `root` is present in the ring buffer, in a dedicated stack frame.
 ///
-/// Marked `#[inline(never)]` so the loop over the 1024-byte root_history array
-/// runs in its own frame and does not inflate the cast_vote handler's frame.
+/// Marked `#[inline(never)]` so the loop over the root_history array runs in its
+/// own frame and does not inflate the cast_vote handler's frame.
+///
+/// The zero-value guard (`*root != [0;32]`) is essential: the ring buffer is
+/// zero-initialised in `create_proposal`, so un-written slots contain all-zero
+/// bytes.  Without the guard, passing `merkle_root = [0;32]` would match any
+/// un-written slot and be accepted as a "known" root even though `[0;32]` is
+/// never a valid Poseidon output and was never the actual state of the tree.
+/// A valid Poseidon/Merkle root is always a non-zero BN254 field element.
 #[inline(never)]
 fn root_in_history(history: &[[u8; HASH_SIZE]; ROOT_HISTORY_SIZE], root: &[u8; HASH_SIZE]) -> bool {
-    history.iter().any(|r| r == root)
+    *root != [0u8; HASH_SIZE] && history.iter().any(|r| r == root)
 }
 
 /// Initialises a NullifierRecord in a dedicated stack frame.

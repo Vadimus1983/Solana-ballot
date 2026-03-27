@@ -23,6 +23,6 @@ pub struct RootHistoryAccount {
 
 impl RootHistoryAccount {
     pub const LEN: usize = ANCHOR_DISCRIMINATOR
-        + ROOT_HISTORY_SIZE * HASH_SIZE   // root_history  (32 × 32 = 1024 bytes)
-        + 1;                              // root_history_index
+        + ROOT_HISTORY_SIZE * HASH_SIZE   // root_history  (256 × 32 = 8 192 bytes)
+        + 1;                              // root_history_index (u8, wraps at 256 = ROOT_HISTORY_SIZE)
 }

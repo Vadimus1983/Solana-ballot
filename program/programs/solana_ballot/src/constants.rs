@@ -36,12 +36,24 @@ pub const MERKLE_DEPTH: usize = 20;
 /// Storage size for the incremental Merkle tree frontier (one hash per level).
 pub const MERKLE_FRONTIER_SIZE: usize = MERKLE_DEPTH * HASH_SIZE; // 640 bytes
 
-/// Number of historical Merkle roots retained in the Proposal account.
-/// cast_vote accepts a proof generated against any root in this ring buffer,
-/// eliminating the race condition where register_voter calls after proof
-/// generation invalidate a voter's already-computed proof.
-/// 32 slots means a voter's proof stays valid across 32 subsequent registrations.
-pub const ROOT_HISTORY_SIZE: usize = 32;
+/// Number of historical Merkle roots retained in the RootHistoryAccount ring buffer.
+///
+/// `cast_vote` accepts a proof generated against any root found here, eliminating
+/// the race condition where later `register_voter` calls invalidate a proof that
+/// was computed mid-registration.
+///
+/// **Sizing rationale — griefing cost:**
+/// A compromised admin can evict a voter's proof root by registering more voters
+/// after the voter generated their proof.  Each extra registration costs ~0.003 SOL
+/// in locked rent (three PDAs: PendingCommitmentRecord, CommitmentRecord, VoterRecord).
+/// With 256 slots an attacker must make 256 fake registrations (≈ 0.77 SOL) to
+/// evict a single voter's root, and the voter can always regenerate a proof against
+/// `proposal.merkle_root` (the frozen root at `open_voting` time) as a fallback.
+///
+/// **Index type constraint:**
+/// `RootHistoryAccount.root_history_index` is a `u8`, which wraps naturally at 256.
+/// ROOT_HISTORY_SIZE must not exceed 256 without also widening that field.
+pub const ROOT_HISTORY_SIZE: usize = 256;
 
 /// Number of public inputs in the combined ZK proof:
 ///   nullifier, proposal_id, merkle_root, vote_commitment
