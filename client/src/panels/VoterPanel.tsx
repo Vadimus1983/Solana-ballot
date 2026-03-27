@@ -13,6 +13,11 @@ import { getVoteRecordPda } from "../lib/pda";
 import type { ProposalAccount } from "../hooks/useProposal";
 import { ComputeBudgetProgram } from "@solana/web3.js";
 import type { PublicKey } from "@solana/web3.js";
+import {
+  notificationsSupported,
+  notificationPermission,
+  requestNotificationPermission,
+} from "../lib/notifications";
 
 const REVEAL_GRACE_SECONDS = 86_400; // 24 h — must match on-chain REVEAL_GRACE_PERIOD
 
@@ -103,31 +108,45 @@ export function VoterPanel({ proposal, proposalPda, onRefresh }: Props) {
 
   if (status === "registration") {
     if (reg) {
-      return <Notice>Commitment submitted. Waiting for the admin to complete your registration.</Notice>;
+      return (
+        <div className="space-y-3">
+          <NotificationOptIn />
+          <Notice>Commitment submitted. Waiting for the admin to complete your registration.</Notice>
+        </div>
+      );
     }
     return (
-      <RegisterCommitmentForm
-        program={program}
-        voter={publicKey}
-        proposalPda={proposalPda}
-        onSuccess={onRefresh}
-      />
+      <div className="space-y-3">
+        <NotificationOptIn />
+        <RegisterCommitmentForm
+          program={program}
+          voter={publicKey}
+          proposalPda={proposalPda}
+          onSuccess={onRefresh}
+        />
+      </div>
     );
   }
 
   if (status === "voting") {
     if (ballot && !ballot.revealed) {
       return (
-        <VotingClosesNotice votingEndUnix={proposal.votingEnd.toNumber()} />
+        <div className="space-y-3">
+          <NotificationOptIn />
+          <VotingClosesNotice votingEndUnix={proposal.votingEnd.toNumber()} />
+        </div>
       );
     }
     return (
-      <CastVoteForm
-        program={program}
-        voter={publicKey}
-        proposalPda={proposalPda}
-        onSuccess={onRefresh}
-      />
+      <div className="space-y-3">
+        <NotificationOptIn />
+        <CastVoteForm
+          program={program}
+          voter={publicKey}
+          proposalPda={proposalPda}
+          onSuccess={onRefresh}
+        />
+      </div>
     );
   }
 
@@ -152,6 +171,45 @@ function Notice({ children }: { children: React.ReactNode }) {
   return (
     <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 text-slate-600">
       {children}
+    </div>
+  );
+}
+
+/**
+ * Asks the voter to enable browser notifications so they are alerted when the
+ * proposal transitions phases (Registration → Voting → Closed → Finalized).
+ * Hidden once permission is granted or denied.
+ */
+function NotificationOptIn() {
+  const [permission, setPermission] = useState<string>(() =>
+    notificationsSupported() ? notificationPermission() : "unsupported"
+  );
+
+  // Re-check permission state in case it changed outside the app.
+  useEffect(() => {
+    if (!notificationsSupported()) return;
+    setPermission(notificationPermission());
+  }, []);
+
+  // Already resolved — nothing to show.
+  if (permission === "granted" || permission === "denied" || permission === "unsupported") {
+    return null;
+  }
+
+  return (
+    <div className="flex items-center justify-between bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-3 text-sm">
+      <span className="text-indigo-700">
+        Get notified when voting opens or closes.
+      </span>
+      <button
+        onClick={async () => {
+          const granted = await requestNotificationPermission();
+          setPermission(granted ? "granted" : "denied");
+        }}
+        className="ml-4 shrink-0 text-xs font-medium text-indigo-600 hover:text-indigo-800 underline underline-offset-2"
+      >
+        Enable notifications
+      </button>
     </div>
   );
 }

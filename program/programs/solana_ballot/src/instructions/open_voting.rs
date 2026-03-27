@@ -60,6 +60,12 @@ pub fn handler(ctx: Context<OpenVoting>) -> Result<()> {
 
     proposal.status = ProposalStatus::Voting;
 
+    emit!(VotingOpened {
+        proposal_id: proposal.id,
+        voter_count: proposal.voter_count,
+        voting_end: proposal.voting_end,
+    });
+
     msg!(
         "Voting opened. Registered voters: {}. Window: {} – {}",
         proposal.voter_count,
@@ -67,6 +73,13 @@ pub fn handler(ctx: Context<OpenVoting>) -> Result<()> {
         proposal.voting_end,
     );
     Ok(())
+}
+
+#[event]
+pub struct VotingOpened {
+    pub proposal_id: [u8; 32],
+    pub voter_count: u64,
+    pub voting_end: i64,
 }
 
 #[derive(Accounts)]

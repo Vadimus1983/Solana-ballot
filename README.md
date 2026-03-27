@@ -291,17 +291,11 @@ Assumes full participation: every registered voter casts a vote and reveals it.
 
 The admin must submit one transaction per voter during registration. For hundreds or thousands of voters this creates a serial bottleneck. A batched variant accepting multiple `(voter, commitment)` pairs per call would significantly reduce wall-clock time and admin transaction fees.
 
-### 4. No Voter Notification Mechanism
-
-Voters must poll the `Proposal` account (or subscribe via WebSocket account-change notifications) to detect the transition to `Voting` status. There is no event indexed by voter identity or push-notification infrastructure.
-
-> **Partial mitigation (client):** After casting a vote the UI now shows a live countdown to `voting_end`, so voters know exactly when to return to reveal.
-
-### 5. Binary (Yes/No) Votes Only
+### 4. Binary (Yes/No) Votes Only
 
 The circuit enforces `vote ∈ {0, 1}`. Multi-choice, ranked-choice, or token-weighted voting require circuit changes and a new trusted-setup ceremony.
 
-### 6. Merkle Root Is Snapshot-Based at Proof Time
+### 5. Merkle Root Is Snapshot-Based at Proof Time
 
 The `merkle_root` in the `Proposal` account reflects the state after the last `register_voter` call. A voter who generates their Groth16 proof before the final batch of registrations is processed will hold a stale root and their proof will fail on-chain. Voters must fetch the root immediately before generating their proof.
 

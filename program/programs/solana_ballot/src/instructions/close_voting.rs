@@ -21,8 +21,19 @@ pub fn handler(ctx: Context<CloseVoting>) -> Result<()> {
 
     proposal.status = ProposalStatus::Closed;
 
+    emit!(VotingClosed {
+        proposal_id: proposal.id,
+        vote_count: proposal.vote_count,
+    });
+
     msg!("Voting closed. Total votes cast: {}", proposal.vote_count);
     Ok(())
+}
+
+#[event]
+pub struct VotingClosed {
+    pub proposal_id: [u8; 32],
+    pub vote_count: u64,
 }
 
 #[derive(Accounts)]

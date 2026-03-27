@@ -63,8 +63,23 @@ pub fn handler(
     proposal.closed_commitment_count = 0;
     proposal.bump                    = ctx.bumps.proposal;
 
+    emit!(ProposalCreated {
+        proposal_id: proposal.id,
+        admin: proposal.admin,
+        voting_start: proposal.voting_start,
+        voting_end: proposal.voting_end,
+    });
+
     msg!("Proposal created: {:?}", proposal.title);
     Ok(())
+}
+
+#[event]
+pub struct ProposalCreated {
+    pub proposal_id: [u8; 32],
+    pub admin: Pubkey,
+    pub voting_start: i64,
+    pub voting_end: i64,
 }
 
 #[derive(Accounts)]
