@@ -76,6 +76,13 @@ pub struct ReplaceVk<'info> {
 
     /// The proposal whose VK is being replaced.
     /// Heap-boxed to keep the BPF stack frame within the 4 096-byte limit.
+    /// `has_one = admin` ensures only the proposal's creator can replace its VK;
+    /// `seeds` + `bump` verify this is the genuine program PDA.
+    #[account(
+        has_one = admin @ BallotError::Unauthorized,
+        seeds = [SEED_PROPOSAL, proposal.admin.as_ref(), proposal.title_seed.as_ref()],
+        bump = proposal.bump,
+    )]
     pub proposal: Box<Account<'info, Proposal>>,
 
     /// Per-proposal VK PDA — must already exist (created by store_vk).
