@@ -4,6 +4,7 @@ pub mod register_commitment;
 pub mod register_voter;
 pub mod open_voting;
 pub mod store_vk;
+pub mod replace_vk;
 pub mod cast_vote;
 pub mod close_voting;
 pub mod reveal_vote;

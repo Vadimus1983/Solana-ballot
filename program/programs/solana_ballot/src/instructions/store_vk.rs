@@ -72,7 +72,7 @@ pub fn handler(
 
 /// Returns true if `point` is a non-identity G1 element with both coordinates
 /// strictly less than BN254_PRIME (big-endian lexicographic comparison).
-fn validate_g1(point: &[u8; PROOF_A_SIZE]) -> bool {
+pub(crate) fn validate_g1(point: &[u8; PROOF_A_SIZE]) -> bool {
     let x: [u8; 32] = point[..32].try_into().unwrap();
     let y: [u8; 32] = point[32..].try_into().unwrap();
     // Reject the identity (0, 0) and out-of-range coordinates.
@@ -81,7 +81,7 @@ fn validate_g1(point: &[u8; PROOF_A_SIZE]) -> bool {
 
 /// Returns true if `point` is a non-identity G2 element with all four Fp2
 /// coordinate chunks strictly less than BN254_PRIME.
-fn validate_g2(point: &[u8; PROOF_B_SIZE]) -> bool {
+pub(crate) fn validate_g2(point: &[u8; PROOF_B_SIZE]) -> bool {
     let chunks: [[u8; 32]; 4] = [
         point[..32].try_into().unwrap(),
         point[32..64].try_into().unwrap(),

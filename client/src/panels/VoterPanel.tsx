@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useProgram } from "../hooks/useProgram";
 import { TxButton } from "../components/TxButton";
@@ -10,7 +11,35 @@ import {
 } from "../lib/devProof";
 import { getVoteRecordPda } from "../lib/pda";
 import type { ProposalAccount } from "../hooks/useProposal";
+import { ComputeBudgetProgram } from "@solana/web3.js";
 import type { PublicKey } from "@solana/web3.js";
+
+const REVEAL_GRACE_SECONDS = 86_400; // 24 h — must match on-chain REVEAL_GRACE_PERIOD
+
+/** Returns a live "Xh Ym Zs" countdown string to `targetUnixSeconds`. */
+function useCountdown(targetUnixSeconds: number): { label: string; expired: boolean; urgent: boolean } {
+  const [remaining, setRemaining] = useState(() =>
+    Math.max(0, targetUnixSeconds - Math.floor(Date.now() / 1000))
+  );
+
+  useEffect(() => {
+    const tick = () =>
+      setRemaining(Math.max(0, targetUnixSeconds - Math.floor(Date.now() / 1000)));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [targetUnixSeconds]);
+
+  if (remaining === 0) return { label: "Expired", expired: true, urgent: true };
+  const h = Math.floor(remaining / 3600);
+  const m = Math.floor((remaining % 3600) / 60);
+  const s = remaining % 60;
+  return {
+    label: `${h}h ${String(m).padStart(2, "0")}m ${String(s).padStart(2, "0")}s`,
+    expired: false,
+    urgent: remaining < 6 * 3600, // warn when < 6 hours left
+  };
+}
 
 // ── localStorage helpers ──────────────────────────────────────────────────────
 
@@ -88,7 +117,9 @@ export function VoterPanel({ proposal, proposalPda, onRefresh }: Props) {
 
   if (status === "voting") {
     if (ballot && !ballot.revealed) {
-      return <Notice>Vote cast! Wait for voting to close, then come back to reveal your vote.</Notice>;
+      return (
+        <VotingClosesNotice votingEndUnix={proposal.votingEnd.toNumber()} />
+      );
     }
     return (
       <CastVoteForm
@@ -108,6 +139,7 @@ export function VoterPanel({ proposal, proposalPda, onRefresh }: Props) {
         program={program}
         proposalPda={proposalPda}
         ballot={ballot}
+        votingEndUnix={proposal.votingEnd.toNumber()}
         onSuccess={onRefresh}
       />
     );
@@ -120,6 +152,19 @@ function Notice({ children }: { children: React.ReactNode }) {
   return (
     <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 text-slate-600">
       {children}
+    </div>
+  );
+}
+
+/** Shown after a vote is cast while voting is still open. */
+function VotingClosesNotice({ votingEndUnix }: { votingEndUnix: number }) {
+  const { label, expired } = useCountdown(votingEndUnix);
+  return (
+    <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 space-y-1 text-slate-600">
+      <p>Vote cast! Come back to reveal after voting closes.</p>
+      <p className="text-sm font-mono text-slate-500">
+        {expired ? "Voting period has ended — go to the Reveal tab." : `Voting closes in ${label}`}
+      </p>
     </div>
   );
 }
@@ -172,10 +217,9 @@ function CastVoteForm({ program, voter, proposalPda, onSuccess }: {
     const nullifier = generateDevNullifier();
     const voteCommitment = computeDevCommitment(vote, DEV_RANDOMNESS);
 
-    // nullifier_record and vote_record PDAs are auto-derived by Anchor
-    // (seeded by [nullifier, proposal] — in IDL with "arg" kind for nullifier).
-    // vk_account is auto-derived from [\"vk\", proposal] (also in IDL).
-    // refund_to = voter so the voter reclaims rent after cleanup.
+    // Groth16 alt_bn128 pairing verification consumes ~1.4 M CU — well above
+    // the default 200 k CU limit. Prepend SetComputeUnitLimit so the transaction
+    // is never silently rejected with ComputationalBudgetExceeded.
     await program.methods
       .castVote(
         Buffer.from(DEV_PROOF),         // proof: Vec<u8>
@@ -187,6 +231,9 @@ function CastVoteForm({ program, voter, proposalPda, onSuccess }: {
         voter,
         proposal: proposalPda,
       })
+      .preInstructions([
+        ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+      ])
       .rpc();
 
     saveBallot({
@@ -217,12 +264,16 @@ function CastVoteForm({ program, voter, proposalPda, onSuccess }: {
 
 // ── Reveal Vote ───────────────────────────────────────────────────────────────
 
-function RevealVoteForm({ program, proposalPda, ballot, onSuccess }: {
+function RevealVoteForm({ program, proposalPda, ballot, votingEndUnix, onSuccess }: {
   program: NonNullable<ReturnType<typeof useProgram>>;
   proposalPda: PublicKey;
   ballot: BallotState;
+  votingEndUnix: number;
   onSuccess: () => void;
 }) {
+  const revealDeadlineUnix = votingEndUnix + REVEAL_GRACE_SECONDS;
+  const { label, expired, urgent } = useCountdown(revealDeadlineUnix);
+
   async function reveal() {
     const nullifier   = new Uint8Array(ballot.nullifier);
     const randomness  = new Uint8Array(ballot.randomness);
@@ -246,11 +297,31 @@ function RevealVoteForm({ program, proposalPda, ballot, onSuccess }: {
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-4">
       <h3 className="font-semibold text-slate-800">Reveal Your Vote</h3>
+
+      {/* Reveal deadline warning */}
+      <div className={`rounded-lg px-4 py-3 text-sm ${
+        expired
+          ? "bg-red-50 border border-red-300 text-red-700"
+          : urgent
+          ? "bg-yellow-50 border border-yellow-300 text-yellow-800"
+          : "bg-blue-50 border border-blue-200 text-blue-700"
+      }`}>
+        {expired ? (
+          <span>⛔ Reveal window has closed. Your vote will not be counted in the tally.</span>
+        ) : (
+          <span>
+            {urgent ? "⚠️ " : "ℹ️ "}
+            Reveal deadline: <span className="font-mono font-semibold">{label}</span> remaining.
+            {urgent && " Reveal now to ensure your vote is counted."}
+          </span>
+        )}
+      </div>
+
       <p className="text-sm text-slate-500">
         You voted <strong>{ballot.vote === 1 ? "YES" : "NO"}</strong>. Revealing adds your
         vote to the on-chain tally.
       </p>
-      <TxButton label="Reveal Vote" onClick={reveal} />
+      <TxButton label="Reveal Vote" onClick={reveal} disabled={expired} />
     </div>
   );
 }

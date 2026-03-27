@@ -46,6 +46,10 @@ export function AdminPanel({ proposal, proposalPda, onRefresh, onProposalCreated
         <RegisterVoterForm program={program} proposalPda={proposalPda!} onRefresh={onRefresh} />
       )}
 
+      {proposal && status === "registration" && (
+        <ReplaceVkNotice />
+      )}
+
       {proposal && (
         <LifecycleControls
           program={program}
@@ -171,6 +175,24 @@ function RegisterVoterForm({ program, proposalPda, onRefresh }: {
         onChange={e => setVoterAddress(e.target.value)}
       />
       <TxButton label="Register Voter" onClick={submit} disabled={!valid} />
+    </section>
+  );
+}
+
+// ── Replace VK Notice ─────────────────────────────────────────────────────────
+
+function ReplaceVkNotice() {
+  return (
+    <section className="bg-amber-50 border border-amber-200 rounded-xl p-5 space-y-2">
+      <h3 className="font-semibold text-amber-800 text-sm">Wrong VK uploaded?</h3>
+      <p className="text-xs text-amber-700">
+        If an incorrect verification key was stored via <code>store_vk</code>, you can replace
+        it using the <code>replace_vk</code> instruction — but only while the proposal is still
+        in <strong>Registration</strong>. Once voting opens the key is permanently frozen.
+      </p>
+      <p className="text-xs text-amber-600 font-mono">
+        anchor client replace_vk &lt;proposal&gt; &lt;vk_alpha&gt; &lt;vk_beta&gt; ...
+      </p>
     </section>
   );
 }

@@ -9,7 +9,7 @@ pub mod state;
 
 use instructions::{
     initialize::*, create_proposal::*, register_commitment::*, register_voter::*,
-    open_voting::*, store_vk::*, cast_vote::*, close_voting::*, reveal_vote::*,
+    open_voting::*, store_vk::*, replace_vk::*, cast_vote::*, close_voting::*, reveal_vote::*,
     finalize_tally::*, close_vote_accounts::*, close_commitment_record::*,
     close_proposal::*, close_vk::*, expire_proposal::*,
 };
@@ -102,6 +102,26 @@ pub mod solana_ballot {
         vk_ic: [[u8; PROOF_A_SIZE]; 5],
     ) -> Result<()> {
         instructions::store_vk::handler(ctx, vk_alpha_g1, vk_beta_g2, vk_gamma_g2, vk_delta_g2, vk_ic)
+    }
+
+    /// Replaces the Groth16 verifying key while the proposal is still in Registration phase.
+    ///
+    /// Safety valve for the case where the wrong VK was uploaded via `store_vk`
+    /// (e.g. a test key or a key for the wrong circuit). Once `open_voting` is called
+    /// the VK is permanently frozen. Caller must be the program authority.
+    ///
+    /// # Parameters
+    /// Same layout as `store_vk` — see that instruction for field descriptions.
+    #[allow(clippy::too_many_arguments)]
+    pub fn replace_vk(
+        ctx: Context<ReplaceVk>,
+        vk_alpha_g1: [u8; PROOF_A_SIZE],
+        vk_beta_g2: [u8; PROOF_B_SIZE],
+        vk_gamma_g2: [u8; PROOF_B_SIZE],
+        vk_delta_g2: [u8; PROOF_B_SIZE],
+        vk_ic: [[u8; PROOF_A_SIZE]; 5],
+    ) -> Result<()> {
+        instructions::replace_vk::handler(ctx, vk_alpha_g1, vk_beta_g2, vk_gamma_g2, vk_delta_g2, vk_ic)
     }
 
     /// Opens voting for a proposal, transitioning it from Registration → Voting.
