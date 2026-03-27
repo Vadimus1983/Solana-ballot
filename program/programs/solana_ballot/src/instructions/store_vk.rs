@@ -110,10 +110,14 @@ pub struct StoreVk<'info> {
     ///
     /// Heap-boxed so the ~1 200-byte Proposal struct is allocated on the heap
     /// rather than the BPF stack, keeping the frame within Solana's 4 096-byte
-    /// limit. Anchor's implicit owner + discriminator checks ensure only a
-    /// genuine program-owned Proposal account is accepted — any other address
-    /// (random keypair, system account, foreign PDA) is rejected before the
-    /// handler runs.
+    /// limit. `has_one = admin` ensures only the proposal's creator can store a
+    /// VK for it; `seeds` + `bump` verify this is a genuine program PDA and not
+    /// a spoofed account with a matching discriminator.
+    #[account(
+        has_one = admin @ BallotError::Unauthorized,
+        seeds = [SEED_PROPOSAL, proposal.admin.as_ref(), proposal.title_seed.as_ref()],
+        bump = proposal.bump,
+    )]
     pub proposal: Box<Account<'info, Proposal>>,
 
     /// Per-proposal VK PDA. Scoped to this proposal so a compromised key
