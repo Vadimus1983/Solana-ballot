@@ -19,10 +19,16 @@ pub struct RootHistoryAccount {
 
     /// Write head into root_history (wraps via wrapping_add, mod ROOT_HISTORY_SIZE).
     pub root_history_index: u8,
+
+    /// PDA bump seed stored at creation so subsequent instructions can use
+    /// `create_program_address` (single syscall) instead of `find_program_address`
+    /// (iterative search), consistent with every other PDA in the program.
+    pub bump: u8,
 }
 
 impl RootHistoryAccount {
     pub const LEN: usize = ANCHOR_DISCRIMINATOR
         + ROOT_HISTORY_SIZE * HASH_SIZE   // root_history  (256 × 32 = 8 192 bytes)
-        + 1;                              // root_history_index (u8, wraps at 256 = ROOT_HISTORY_SIZE)
+        + 1                               // root_history_index (u8, wraps at 256 = ROOT_HISTORY_SIZE)
+        + 1;                              // bump (u8)
 }

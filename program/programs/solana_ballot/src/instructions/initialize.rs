@@ -23,6 +23,8 @@ pub fn handler(ctx: Context<Initialize>) -> Result<()> {
     let config = &mut ctx.accounts.program_config;
     config.authority = ctx.accounts.admin.key();
     config.bump = ctx.bumps.program_config;
+    // Record whether this is a dev build so clients can detect and warn users.
+    config.is_dev_mode = cfg!(feature = "dev");
 
     msg!("Solana Ballot initialized. Authority: {}", config.authority);
     Ok(())

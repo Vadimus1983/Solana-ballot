@@ -38,7 +38,7 @@ pub struct CloseProposal<'info> {
     #[account(
         mut,
         seeds = [SEED_ROOT_HISTORY, proposal.key().as_ref()],
-        bump,
+        bump = root_history_account.load()?.bump,
         close = admin,
     )]
     pub root_history_account: AccountLoader<'info, RootHistoryAccount>,

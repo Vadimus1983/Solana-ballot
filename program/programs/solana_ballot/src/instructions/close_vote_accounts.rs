@@ -45,9 +45,15 @@ pub struct CloseVoteAccounts<'info> {
     /// (`Pubkey::default()`), this must equal `closer` — any caller may then
     /// direct the rent to themselves, preserving permissionless cleanup.
     ///
-    /// CHECK: validated by constraint against vote_record.refund_to
+    /// `!executable` prevents lamports from being routed to a deployed program
+    /// executable account (data accounts owned by programs, e.g. multisig vaults,
+    /// are not executable and are still valid destinations).
+    ///
+    /// CHECK: key validated by constraint against vote_record.refund_to;
+    ///        executable flag validated by the !executable constraint below.
     #[account(
         mut,
+        constraint = !refund_to.executable @ BallotError::InvalidRefundTo,
         constraint = (vote_record.refund_to == Pubkey::default() && refund_to.key() == closer.key())
             || refund_to.key() == vote_record.refund_to
             @ BallotError::InvalidRefundTo,

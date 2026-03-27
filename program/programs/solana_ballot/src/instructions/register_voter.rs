@@ -86,10 +86,12 @@ pub struct RegisterVoter<'info> {
     /// voter pubkey without also producing a different `pending_commitment` PDA,
     /// which must have been created by that voter's signature.
     ///
-    /// Marked `mut` so it can receive the `pending_commitment` rent refund.
-    /// CHECK: pubkey is verified via seeds on `pending_commitment` and `voter_record`.
+    /// `SystemAccount` enforces owner == System Program, making the implicit
+    /// PDA-seed binding explicit and preventing rent from flowing to a
+    /// program-owned account via the `close = voter` constraint on
+    /// `pending_commitment`.
     #[account(mut)]
-    pub voter: UncheckedAccount<'info>,
+    pub voter: SystemAccount<'info>,
 
     /// Heap-boxed so the ~1 200-byte Proposal struct is allocated on the heap
     /// rather than the BPF stack, keeping the frame within Solana's 4 096-byte limit.
@@ -119,6 +121,14 @@ pub struct RegisterVoter<'info> {
     /// Commitment uniqueness guard. `init_if_needed` recovers a pre-funded (squatted)
     /// PDA transparently; genuine duplicate calls are caught by the handler's
     /// `CommitmentAlreadyRegistered` guard on `commitment_record.commitment`.
+    ///
+    /// Squatting defence: if an attacker pre-funds this PDA address (a system
+    /// account with lamports but no program data), `init_if_needed` calls
+    /// `allocate`+`assign`, zeroing all data. The zero-commitment guard then
+    /// evaluates correctly against the freshly zeroed account. An attacker
+    /// cannot pre-write program-owned data without invoking this program, and
+    /// any such prior write would have set `commitment` to a non-zero value,
+    /// causing the `CommitmentAlreadyRegistered` check to fire.
     #[account(
         init_if_needed,
         payer = admin,
@@ -131,6 +141,11 @@ pub struct RegisterVoter<'info> {
     /// Identity uniqueness guard. `init_if_needed` recovers a pre-funded (squatted)
     /// PDA transparently; genuine double-registration attempts are caught by the
     /// handler's `VoterAlreadyRegistered` guard on `voter_record.is_initialized`.
+    ///
+    /// Squatting defence: same reasoning as `commitment_record` above. A pre-funded
+    /// system account is recovered by `init_if_needed` (data zeroed), leaving
+    /// `is_initialized = false`. A previously program-written account would have
+    /// `is_initialized = true`, correctly triggering `VoterAlreadyRegistered`.
     #[account(
         init_if_needed,
         payer = admin,
@@ -145,7 +160,7 @@ pub struct RegisterVoter<'info> {
     #[account(
         mut,
         seeds = [SEED_ROOT_HISTORY, proposal.key().as_ref()],
-        bump,
+        bump = root_history_account.load()?.bump,
     )]
     pub root_history_account: AccountLoader<'info, RootHistoryAccount>,
 

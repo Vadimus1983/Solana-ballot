@@ -71,6 +71,9 @@ pub fn handler(
         rh.root_history_index = 0;
         // root_history is already zeroed; explicit assignment avoids dead_code warnings.
         rh.root_history = [[0u8; HASH_SIZE]; ROOT_HISTORY_SIZE];
+        // Store the canonical bump so subsequent instructions can use
+        // create_program_address (single syscall) instead of find_program_address.
+        rh.bump = ctx.bumps.root_history_account;
     }
 
     emit!(ProposalCreated {

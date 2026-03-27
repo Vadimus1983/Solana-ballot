@@ -302,7 +302,7 @@ pub struct CastVote<'info> {
     /// verify the caller-supplied merkle_root was a valid root during registration.
     #[account(
         seeds = [SEED_ROOT_HISTORY, proposal.key().as_ref()],
-        bump,
+        bump = root_history_account.load()?.bump,
     )]
     pub root_history_account: AccountLoader<'info, RootHistoryAccount>,
 
